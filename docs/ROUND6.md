@@ -277,8 +277,8 @@ Leif, verbatim: "and if we scan and see a resource we need teh drones should be 
 - **The ship antenna covers a long range from the start.** Drones work immediately, with no physical antennas needed early (this replaces the antenna-placement requirement for the starting area). Relays matter only far away or deep underground.
 - **Vision needs cameras and data** (consistent with section J fog of war): what you are not looking at is only known through cameras, sensors and the AI's records, and goes stale.
 - **Version control (proper).**
-  - Each round is developed on its own branch (round-N) with commits per feature.
-  - It is merged to main after the checks pass, and tagged (v0.N).
+  - Trunk-based on main. The fleet rule forbids branches: Leif, 2026-10-26: "we should never branch or we have branch hell".
+  - One commit per feature or round, after the checks pass, and an annotated tag per round (v0.N).
   - The Pages deploy runs from main.
   - Planning documents are committed as they are written.
 
