@@ -72,13 +72,16 @@ export function renderFrame(flash) {
 // modes:  0 unlit, 1 lit by the surface light map, 2 additive emissive
 // extra per instance (iD): taper 0..1 (the far end is thinner), curve in px (a parabolic bend), rim light 0..1
 const BV = `
-attribute vec4 iA, iB, iC, iD; varying vec2 vL, vS, vW; varying vec4 vC, vP, vD;
+attribute vec4 iA, iB, iC, iD; varying vec2 vL, vS, vW; varying vec4 vC, vP, vD; uniform vec2 uBend;
 void main(){ vec2 p = position.xy*iA.zw; float rr = iB.y>8.5&&iB.y<9.5 ? 0. : iB.x; float c=cos(rr), s=sin(rr);
   p = vec2(c*p.x-s*p.y, s*p.x+c*p.y)+iA.xy; vL=position.xy; vS=iA.zw; vW=p; vC=iC; vP=iB; vD=iD;
+  // the planet: uBend = (radius, camera altitude) in px. A point keeps its arc length and its altitude, so the sprite
+  // stands along local up wherever it is; vW stays flat for the light map.
+  if(uBend.x>0.){ float th=p.x/uBend.x, rr=uBend.x+uBend.y+p.y; p=vec2(rr*sin(th), rr*cos(th)-uBend.x-uBend.y); }
   gl_Position = projectionMatrix*vec4(p,0.,1.); }`;
 const BF = `
 precision highp float; varying vec2 vL, vS, vW; varying vec4 vC, vP, vD;
-uniform sampler2D uLight; uniform vec4 uLR; uniform vec2 uSun; uniform float uSoft, uTime; uniform vec3 uRim;
+uniform sampler2D uLight; uniform vec4 uLR; uniform vec2 uSun; uniform float uSoft, uTime, uFade; uniform vec3 uRim;
 float h(vec2 p){ p=fract(p*vec2(443.897,441.423)); p+=dot(p,p.yx+19.19); return fract((p.x+p.y)*p.x); }
 float vn(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.-2.*f); return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y); }
 float ridge(float x, float s){ return .5+.5*(sin(x*.11+s)*.5+sin(x*.047+s*2.3)*.9+sin(x*.31+s*4.1)*.2+sin(x*.83+s*7.7)*.07+sin(x*1.9+s*3.3)*.03+sin(x*4.3+s)*.012)/1.712; }
@@ -122,7 +125,7 @@ void main(){
     col*=(.3+.75*smoothstep(-.8,.7,u.y+(face-.5)*1.2))*(.7+.5*face)*(.8+.4*h(floor(q/1.5)+vP.w))*(1.-.45*crack)*(1.-.4*smoothstep(R-.5,R,d)); rim=vD.z*smoothstep(R-.28,R-.02,d)*smoothstep(.1,.7,u.y)*.7; }
   if(mode>0.5&&mode<1.5){ vec3 L=texture2D(uLight,(vW-uLR.xy)*uLR.zw).rgb; L=L*L*4.0; col=col*L+uRim*rim*(L+vec3(.004)); }
   else if(mode<0.5) col+=(col*1.2+uRim)*rim;
-  a*=ca;
+  a*=ca*uFade;
   gl_FragColor = mode>1.5 ? vec4(col*a,0.0) : vec4(col*a,a);
 }`;
 export class Batch {
@@ -132,7 +135,7 @@ export class Batch {
     g.index = p.index; g.setAttribute('position', p.attributes.position);
     this.A = new Float32Array(cap * 4); this.B = new Float32Array(cap * 4); this.C = new Float32Array(cap * 4); this.D = new Float32Array(cap * 4);
     for (const [n, arr] of [['iA', this.A], ['iB', this.B], ['iC', this.C], ['iD', this.D]]) { const at = new THREE.InstancedBufferAttribute(arr, 4); at.setUsage(THREE.DynamicDrawUsage); g.setAttribute(n, at); }
-    this.u = { uLight: { value: null }, uLR: { value: new THREE.Vector4(0, 0, 1, 1) }, uSun: { value: new THREE.Vector2(1, 0) }, uSoft: { value: 1 }, uTime: { value: 0 }, uRim: { value: new THREE.Vector3(0, 0, 0) } };
+    this.u = { uLight: { value: null }, uLR: { value: new THREE.Vector4(0, 0, 1, 1) }, uSun: { value: new THREE.Vector2(1, 0) }, uSoft: { value: 1 }, uTime: { value: 0 }, uRim: { value: new THREE.Vector3(0, 0, 0) }, uBend: { value: new THREE.Vector2(0, 0) }, uFade: { value: 1 } };
     const m = new THREE.ShaderMaterial({ vertexShader: BV, fragmentShader: BF, uniforms: this.u, transparent: true, depthTest: false, depthWrite: false,
       blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneMinusSrcAlphaFactor });
     this.mesh = new THREE.Mesh(g, m); this.mesh.frustumCulled = false; this.mesh.renderOrder = order; if (scene) scene.add(this.mesh); this.g = g;

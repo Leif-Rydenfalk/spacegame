@@ -54,10 +54,11 @@ export function siteDamage(x, y, dmg) {
 }
 export function drawSites(b, time) {
   const cam = S.cam, pl = 0.5 + 0.5 * Math.sin(time * 0.9);
-  for (const st of structsIn(cam.x - 24 / S.zoom, cam.x + 24 / S.zoom)) {
+  const zo = Math.min(S.zo, 4);
+  for (const st of structsIn(cam.x - 24 / S.zoom * zo, cam.x + 24 / S.zoom * zo)) {
     const s = stOf(st.id), dark = s.dark, hdead = s.dead;
     for (const p of st.props) {
-      if (Math.abs(p.x - cam.x) > 22 / S.zoom || Math.abs(p.y - cam.y) > 16) continue;
+      if (Math.abs(p.x - cam.x) > 22 / S.zoom * zo || Math.abs(p.y - cam.y) > 16 * zo) continue;
       const x = p.x, y = p.y, ph = p.i * 1.7, read = s.read[p.i];
       if (p.t === 'glyph') { const k = 0.55 + 0.45 * Math.sin(time * 0.6 + ph), c = mul(C.xeno, 1.6 * k); b.add(x, y, 1.5, 1.5, 0, mul(C.xeno, 0.22 * k), 1, 1, 2);
         for (let i = 0; i < 4; i++) { const a = (p.k * 1.1 + i * 1.57), r1 = 0.08 + ((p.k + i) % 3) * 0.06; b.seg(x + Math.cos(a) * r1, y + Math.sin(a) * r1 + (i - 1.5) * 0.12, x + Math.cos(a + 1.2) * 0.2, y + Math.sin(a + 1.2) * 0.1 + (i - 1.5) * 0.12, 0.028, c, 1, 0, 2); }

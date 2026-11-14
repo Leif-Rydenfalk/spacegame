@@ -25,16 +25,30 @@ export const MAT = [
 ];
 const sm = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
-export function surfaceH(x) {                // metres; the crash site is flat
-  const t = x * 2, h = (fbm(t / 90, 0, 1, 4) - 0.5) * 44 + (noise2(t / 13, 3, 2) - 0.5) * 5;
-  return h * 0.5 * sm(13, 40, Math.abs(x));
-}
-// biome weights along x: 0 fungal forest (cyan), 1 violet thicket, 2 acid marsh. Returns the dominant one and a blend.
-export function biome(x) { const n = noise2(x / 150 + 40, 0, 60) + (noise2(x / 37, 5, 61) - 0.5) * 0.25; return n < 0.42 ? 0 : n < 0.62 ? 1 : 2; }
-export function lushness(x) { return (0.55 + 0.6 * noise2(x / 45, 2, 62)) * sm(5, 16, Math.abs(x)); }
+// ---- the planet ---------------------------------------------------------------------------------------------------
+// The world is a whole round planet. The field is stored in polar coordinates: x is arc length along the datum circle
+// (the circle of radius RAD, where y = 0), y is altitude above it. A point (x, y) is at angle x / RAD and radius
+// RAD + y from the centre; x and x + CIRC are the same place. The grid stays 0.125 m at the datum. Gravity is -y in
+// these coordinates, which is toward the centre everywhere (planet.js has the Cartesian maps and the tests use them).
+// CIRC is 56 site slots of 72 m and 504 chunks of 8 m: 4,032 m around, radius 641.7 m. That is a playable scale, not
+// the real one: the home moon of the orbital act has its real radius, and the HUD shows the real g.
+export const CIRC = 4032, RAD = CIRC / (2 * Math.PI), SEAM = -CIRC / 4, BLEND = 96;
+// the canonical x of a place, in [SEAM, SEAM + CIRC): the crash site is 0, the antipode is CIRC / 2
+export const canonX = x => x - CIRC * Math.floor((x - SEAM) / CIRC);
+// metres along the ground from the crash site, the short way round
+export const homeDist = x => { const c = canonX(x); return c > CIRC / 2 ? CIRC - c : Math.abs(c); };
+// the generators are noise along x, which does not close by itself: over the last BLEND metres before the seam the
+// field cross-fades into its own continuation from the other side, so the circle closes without a step
+const per = (f, x, a, b) => { const c = canonX(x), e = SEAM + CIRC - BLEND; if (c <= e) return f(c, a, b); const t = (c - e) / BLEND, w = t * t * (3 - 2 * t); return f(c, a, b) * (1 - w) + f(c - CIRC, a, b) * w; };
+const surf0 = x => { const t = x * 2, h = (fbm(t / 90, 0, 1, 4) - 0.5) * 44 + (noise2(t / 13, 3, 2) - 0.5) * 5; return h * 0.5 * sm(13, 40, Math.abs(x)); };
+export function surfaceH(x) { return per(surf0, x); }               // metres above the datum; the crash site is flat
+// biome along x: 0 fungal forest (cyan), 1 violet thicket, 2 acid marsh
+export function biome(x) { x = canonX(x); const n = noise2(x / 150 + 40, 0, 60) + (noise2(x / 37, 5, 61) - 0.5) * 0.25; return n < 0.42 ? 0 : n < 0.62 ? 1 : 2; }
+const lush0 = x => (0.55 + 0.6 * noise2(x / 45, 2, 62)) * sm(5, 16, Math.abs(x));
+export function lushness(x) { return per(lush0, x); }
 
 // natural signed density in metres, positive inside rock; h = surfaceH(x)
-export function natD(x, y, h) {
+function nat0(x, y, h) {
   const depth = h - y; if (depth < -0.8) return depth;
   let d = depth;
   const open = Math.abs(x) > 15 && noise2(x / 23, 0, 33) > 0.62 ? 0 : 2.5;
@@ -46,10 +60,11 @@ export function natD(x, y, h) {
   }
   return d;
 }
+export const natD = (x, y, h) => per(nat0, x, y, h);
 // ore fields, each a smooth scalar; the fine pass thresholds them
-export const oreIron = (x, y) => fbm(x / 4, y / 4, 21, 2);
-export const oreCopper = (x, y) => fbm(x / 4, y / 4, 22, 2);
-export const oreLumen = (x, y) => fbm(x / 3, y / 3, 23, 2);
+export const oreIron = (x, y) => per((c, yy) => fbm(c / 4, yy / 4, 21, 2), x, y);
+export const oreCopper = (x, y) => per((c, yy) => fbm(c / 4, yy / 4, 22, 2), x, y);
+export const oreLumen = (x, y) => per((c, yy) => fbm(c / 3, yy / 3, 23, 2), x, y);
 // signed distance of a stamp shape, negative inside
 export function stampSD(s, x, y) {
   if (s.t === 'b') { const cx = (s.x0 + s.x1) / 2, cy = (s.y0 + s.y1) / 2, r = s.r || 0, dx = Math.abs(x - cx) - (s.x1 - s.x0) / 2 + r, dy = Math.abs(y - cy) - (s.y1 - s.y0) / 2 + r; return Math.hypot(Math.max(dx, 0), Math.max(dy, 0)) + Math.min(Math.max(dx, dy), 0) - r; }

@@ -26,7 +26,7 @@ export function canGhost(k, gx, gy) {
 export function addGhost(kind, x, y, dir = 1) { const g = { id: BP.nextId++, kind, x, y, dir, prog: 0, claim: null, have: false }; BP.ghosts.push(g); return g; }
 export function finishGhost(g) {
   const i = BP.ghosts.indexOf(g); if (i >= 0) BP.ghosts.splice(i, 1);
-  if (g.kind === 'wall') world.box(g.x * TS, g.y * TS, (g.x + 1) * TS, (g.y + 1) * TS, 1, M.PLATE); else place(g.kind, g.x, g.y, g.dir);
+  if (g.kind === 'wall') world.box(g.x * TS, g.y * TS, (g.x + 1) * TS, (g.y + 1) * TS, 1, M.PLATE); else { const m = place(g.kind, g.x, g.y, g.dir); if (g.auto) m.auto = true; }
   events.emit('blueprintBuilt', g.kind);
 }
 export function cancelGhost(g) { const i = BP.ghosts.indexOf(g); if (i >= 0) BP.ghosts.splice(i, 1); if (g.have) { const c = costOf(g.kind); for (const k in c) S.add(k, c[k]); } g.dead = true; }
@@ -60,7 +60,7 @@ export function stepBlueprint(dt) {
   // the suit builds the nearest unclaimed ghost in reach by hand, and takes apart marked machines in reach
   BP.hand = null; if (P.dead) return;
   let best = null, bd = 4.2;
-  for (const g of BP.ghosts) { if (g.claim) continue; const e = foot(g.kind), d = Math.hypot((g.x + e.w / 2) * TS - P.x, (g.y + e.h / 2) * TS - P.y - 0.9); if (d < bd && (g.have || S.has(costOf(g.kind)))) { bd = d; best = g; } }
+  for (const g of BP.ghosts) { if (g.claim || g.held) continue; const e = foot(g.kind), d = Math.hypot((g.x + e.w / 2) * TS - P.x, (g.y + e.h / 2) * TS - P.y - 0.9); if (d < bd && (g.have || S.has(costOf(g.kind)))) { bd = d; best = g; } }
   if (best) {
     if (!best.have) { S.pay(costOf(best.kind)); best.have = true; }
     best.prog += dt / (BUILD_T[best.kind] * 2.5); BP.hand = best; weld((best.x + foot(best.kind).w / 2) * TS, (best.y + 0.5) * TS, dt);
@@ -90,5 +90,5 @@ export function drawBlueprint(b, time) {
     else if (BP.tool === 'clear' && BP.drag) { const x0 = Math.min(BP.drag.x, gx) * TS, y0 = Math.min(BP.drag.y, gy) * TS, x1 = (Math.max(BP.drag.x, gx) + 1) * TS, y1 = (Math.max(BP.drag.y, gy) + 1) * TS; b.add((x0 + x1) / 2, (y0 + y1) / 2, x1 - x0, y1 - y0, 0, [0.4, 0.16, 0.02], 0.35, 0, 2); }
   }
 }
-export function dumpBP() { return { g: BP.ghosts.map(g => [g.kind, g.x, g.y, g.dir, +g.prog.toFixed(3), g.have ? 1 : 0]), c: BP.clears.map(c => [c.x0, c.y0, c.x1, c.y1]) }; }
-export function loadBP(o) { BP.ghosts.length = 0; BP.clears.length = 0; if (!o) return; for (const [k, x, y, d, p, h] of o.g) { const g = addGhost(k, x, y, d); g.prog = p; g.have = !!h; } for (const [x0, y0, x1, y1] of o.c) BP.clears.push({ id: BP.nextId++, x0, y0, x1, y1, claim: null, cur: 0 }); }
+export function dumpBP() { return { g: BP.ghosts.map(g => [g.kind, g.x, g.y, g.dir, +g.prog.toFixed(3), g.have ? 1 : 0, g.key ?? null, g.auto ? 1 : 0]), c: BP.clears.map(c => [c.x0, c.y0, c.x1, c.y1]) }; }
+export function loadBP(o) { BP.ghosts.length = 0; BP.clears.length = 0; if (!o) return; for (const [k, x, y, d, p, h, key, au] of o.g) { const g = addGhost(k, x, y, d); g.prog = p; g.have = !!h; if (key !== null && key !== undefined) g.key = key; if (au) g.auto = true; } for (const [x0, y0, x1, y1] of o.c) BP.clears.push({ id: BP.nextId++, x0, y0, x1, y1, claim: null, cur: 0 }); }

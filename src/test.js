@@ -17,7 +17,10 @@ import { K, SHIP, fireBeam, flushPend, stepKit, kitReset } from './surface/kit.j
 import { powerBudget, linked, mobility, REACTOR_W, LASER_W, SUIT_BUS_W, CHARGE_W, MIN_FRAC, REACTOR_KG, LASER_KG } from './surface/power.js';
 import { planDemand, bestProducer, stepSupply, SUP, TARGETS0 } from './surface/supply.js';
 import { KIND, stance, PLAYER_SIZE } from './surface/creatures.js';
-import { GRAV } from './surface/gen.js';
+import { GRAV, CIRC, RAD, SEAM, surfaceH, canonX, homeDist } from './surface/gen.js';
+import { planet } from './surface/planet.js';
+import { queueOrder, bump, planAll, chooseRoute } from './surface/auto.js';
+import { BP as SBP } from './surface/blueprint.js';
 import { place, stepFactory, F } from './surface/factory.js';
 import { addGhost } from './surface/blueprint.js';
 import { save, memAdapter } from './save.js';
@@ -119,8 +122,8 @@ export async function runTests() {
     // hauling: one ship robot, the network up, 23.7 kg of ore on the ground 9 m from the hold
     matter.list.length = 0; robots.length = 0; world.box(-16, 0, 16, 9, -1); world.box(-16, -2, 16, 0, 1, M.BASALT); place('antenna', 4, 0, 1, true); K.awake = false; wakeShipRobots(1); P.x = 30; P.y = 0.1; P.dead = 0; SUP.on = true; SUP.orders = []; K.hold.slots.fill(null);
     const ore = matter.spawn('iron ore', 23.7, -2.5, 0.4); ore.asleep = true; stepKit(1 / 60); let worst = 0, steps = 0;
-    while (inv.count(K.hold, 'iron ore') < 23.7 - 1e-6 && steps++ < 60 * 90) { stepRobots(1 / 60); matter.step(1 / 60); worst = Math.max(worst, Math.abs(matter.total('iron ore') + inv.count(robots[0].cargo, 'iron ore') + inv.count(K.hold, 'iron ore') - 23.7)); }
-    ok('hauling conserves mass', Math.abs(inv.count(K.hold, 'iron ore') - 23.7) < 1e-6 && worst < 1e-6 && matter.total('iron ore') < 1e-9 && inv.mass(robots[0].cargo) < 1e-9, `hold ${inv.count(K.hold, 'iron ore')} after ${(steps / 60).toFixed(1)} s, worst drift ${worst.toExponential(1)}`);
+    while (inv.count(K.hold, 'iron ore') < 23.7 - 1e-6 && steps++ < 60 * 90) { stepRobots(1 / 60); matter.step(1 / 60); worst = Math.max(worst, Math.abs(matter.total('iron ore') + robots.reduce((a, q) => a + inv.count(q.cargo, 'iron ore'), 0) + inv.count(K.hold, 'iron ore') - 23.7)); }
+    ok('hauling conserves mass', Math.abs(inv.count(K.hold, 'iron ore') - 23.7) < 1e-6 && worst < 1e-6 && matter.total('iron ore') < 1e-9 && robots.every(q => inv.mass(q.cargo) < 1e-9) && robots.some(q => q.kind === 'crawler'), `hold ${inv.count(K.hold, 'iron ore')} after ${(steps / 60).toFixed(1)} s, worst drift ${worst.toExponential(1)}`);
     robots.length = 0; }
   // 19 power budget with and without the reactor; the load on the body; the reach of the network
   { const src = [{ id: 'reactor', w: REACTOR_W }, { id: 'suit', w: SUIT_BUS_W }], withR = powerBudget(src, [{ id: 'laser', w: LASER_W, from: ['reactor', 'suit'] }, { id: 'charge', w: CHARGE_W, from: ['reactor'] }]), noR = powerBudget(src, [{ id: 'laser', w: LASER_W, from: ['', 'suit'] }]), two = powerBudget(src, [{ id: 'a', w: LASER_W, from: ['reactor'] }, { id: 'b', w: LASER_W, from: ['reactor'] }]);
@@ -137,11 +140,12 @@ export async function runTests() {
   { const none = new Set(), fur = new Set(['furnace']), a = planDemand({ iron: 10 }, { iron: 30 }, {}, none), b = planDemand({ iron: 10 }, { iron: 30 }, {}, fur), c = planDemand({ iron: 10 }, { iron: 30 }, { iron: 12 }, fur), d = planDemand({ iron: 30, 'power cell': 1 }, { iron: 30, 'power cell': 2 }, {}, fur);
     ok('demand picks the arm first', a.length === 1 && a[0].producer === 'suit' && a[0].batches === 20 && Math.abs(a[0].inputs['iron ore'] - 32) < 1e-9 && bestProducer(RECIPE.iron, none) === 'suit');
     ok('demand picks the machine once built', b[0].producer === 'furnace' && c[0].batches === 8 && d.length === 1 && d[0].item === 'power cell' && d[0].producer === 'suit' && planDemand({ iron: 30 }, { iron: 30 }, {}, fur).length === 0 && bestProducer(RECIPE['power cell'], new Set(['assembler'])) === 'assembler');
-    // through the running AI: ore in the suit and a link: the arm gets the job; a furnace stands: the furnace gets it
+    // through the running AI: ore in the suit, none in the hold, and a link: the ship's fabricator has the order and the
+    // arm, which holds the ore, gets the job; a furnace stands: the furnace gets it
     save.apply({ version: 3, data: d0 }); S.crash = true; kitReset('carried'); F.machines.length = 0; F.cells.clear(); matter.list.length = 0; robots.length = 0; S.inv.slots.fill(null); S.printer.q.length = 0; K.hold.slots.fill(null); P.x = SHIP.x + 3; P.y = 0.1; P.dead = 0; SUP.on = true; SUP.targets = { iron: 30 }; inv.add(S.inv, 'iron ore', 20);
     stepKit(1 / 60); SUP.tick = 0; stepSupply(1); const q1 = S.printer.q.map(j => j.r).join(), o1 = SUP.orders[0] && SUP.orders[0].producer;
     S.printer.q.length = 0; const fu = place('furnace', -30, 0, 1, true); SUP.tick = 0; stepSupply(1); const o2 = SUP.orders[0];
-    ok('the AI queues the right producer', q1 === 'iron' && o1 === 'suit' && o2.producer === 'furnace' && o2.machine === fu && S.printer.q.length === 0, `${q1} ${o1} then ${o2 && o2.producer}`); SUP.targets = { ...TARGETS0 }; }
+    ok('the AI queues the right producer', q1 === 'iron' && o1 === 'ship' && o2.producer === 'furnace' && o2.machine === fu && S.printer.q.length === 0, `${q1} ${o1} then ${o2 && o2.producer}`); SUP.targets = { ...TARGETS0 }; }
   // 21 wary or predator: nothing is hostile by default; what is bigger than you and eats meat hunts you
   { const far = { dist: 40, hurt: false, cornered: false, noise: 0, order: null, hp: 1 }, at = (d, o) => ({ ...far, dist: d, ...o }), st = KIND.strider, sk = KIND.stalker, sc = KIND.scout;
     ok('the herd is wary', stance(st, far) === 'ignore' && stance(st, at(12)) === 'watch' && stance(st, at(6)) === 'flee' && stance(st, at(30, { noise: 20 })) === 'flee' && stance(st, at(1.5, { hurt: true })) === 'defend' && stance(st, at(9, { hurt: true })) === 'flee' && stance(st, at(1.5, { cornered: true })) === 'defend' && stance(KIND.calf, at(1, { hurt: true })) === 'flee');
@@ -151,6 +155,44 @@ export async function runTests() {
   // 22 heat: what the laser leaves cools, spreads, and never grows
   { heat.clear(); heat.add(100, 5, 0.8, 1.5); const t0 = heat.total(), n0 = heat.cells.size; let mono = true, prev = t0, grew = false; for (let i = 0; i < 90; i++) { heat.step(1 / 30 + 1e-9); const t = heat.total(); if (t > prev + 1e-9) mono = false; prev = t; if (i === 5) grew = heat.cells.size > n0; }
     ok('heat cools and spreads', t0 > 5 && mono && prev < t0 * 0.75 && prev > 0 && heat.at(100, 5) > 0 && heat.at(100, 5) < 1.5 && grew, `${t0.toFixed(1)} -> ${prev.toFixed(1)}`); heat.clear(); }
+  // ---- round 4: the planet --------------------------------------------------------------------------------------
+  // 23 gravity is radial everywhere: the field's -y, taken to the planet's Cartesian frame, points at the centre with the
+  // stated g; and a loose body let go a quarter and a half of the way round really falls toward the centre
+  { let worst = 0, wg = 0; const g = [0, 0], c = [0, 0], u = [0, 0];
+    for (let i = 0; i < 97; i++) { const x = SEAM + i / 97 * CIRC * 1.7, y = -30 + (i % 9) * 12; planet.gravity(x, y, g); planet.toCart(x, y, c); planet.up(x, u); const r = Math.hypot(c[0], c[1]); worst = Math.max(worst, Math.abs(g[0] * c[1] - g[1] * c[0]) / r, Math.abs(u[0] * c[0] / r + u[1] * c[1] / r - 1)); wg = Math.max(wg, Math.abs(Math.hypot(g[0], g[1]) - GRAV), g[0] * c[0] + g[1] * c[1] > 0 ? 1 : 0); }
+    ok('gravity points at the centre everywhere', worst < 1e-9 && wg < 1e-9, `${worst} ${wg}`);
+    let fell = true, info = ''; for (const x0 of [CIRC / 4 + 3, CIRC / 2 - 20, -CIRC / 8, 40]) { matter.list.length = 0; const y0 = surfaceH(x0) + 9, b = matter.spawn('iron ore', 6, x0, y0, 0, 0), a = planet.toCart(x0, y0); for (let i = 0; i < 40; i++) matter.step(1 / 120); const e = planet.toCart(b.x, b.y), dx = e[0] - a[0], dy = e[1] - a[1], r = Math.hypot(a[0], a[1]), toward = -(dx * a[0] + dy * a[1]) / r, side = Math.abs(dx * a[1] - dy * a[0]) / r; if (!(toward > 0.3 && side < toward * 0.02)) { fell = false; info += ` ${x0}: ${toward.toFixed(3)} ${side.toFixed(4)}`; } }
+    ok('a body falls toward the centre at any longitude', fell, info); matter.list.length = 0;
+    const sc = [0, 0], cam = { x: CIRC * 0.3, y: 7 }; let up = true, rt = 0; for (let i = 0; i < 40; i++) { const x = cam.x + (r() - 0.5) * 60, y = (r() - 0.5) * 40, a = planet.toScreen(cam, 50, 1600, 900, x, y, [0, 0]), b = planet.toScreen(cam, 50, 1600, 900, x, y + 1, [0, 0]); if (!(b[1] < a[1])) up = false; planet.fromScreen(cam, 50, 1600, 900, a[0], a[1], sc); rt = Math.max(rt, Math.abs(sc[0] - x), Math.abs(sc[1] - y)); }
+    ok('the camera keeps local up on top, and the screen maps back', up && rt < 1e-6 && Math.abs(planet.toScreen(cam, 50, 1600, 900, cam.x, cam.y, sc)[0] - 800) < 1e-9 && Math.abs(sc[1] - 450) < 1e-9, String(rt)); }
+  // 24 the world closes on itself: no step in the ground at the generator's seam, the same field one circumference on,
+  // the same structures, and a walk all the way round comes back to the crash site through both charts
+  { let step = 0, per = 0; for (let k = 1; k < 40; k++) { const e = k * 1e-5; step = Math.max(step, Math.abs(surfaceH(SEAM - e) - surfaceH(SEAM + e))); }
+    let dmax = 0; for (let j = -60; j <= 40; j++) { const y = surfaceH(SEAM) + j * 0.25; dmax = Math.max(dmax, Math.abs(world.dens(SEAM - 0.13, y) - world.dens(SEAM + 0.13, y))); }
+    for (let i = 0; i < 200; i++) { const ix = Math.floor(r() * 30000 - 9000), iy = Math.floor(r() * 500 - 420); if (world.sample(ix, iy) !== world.sample(ix + CIRC / CELL, iy) || world.sampleM(ix, iy) !== world.sampleM(ix - CIRC / CELL, iy)) per++; }
+    ok('terrain is continuous at the seam', step < 0.002 && dmax < 0.45 && Math.abs(surfaceH(77) - surfaceH(77 + CIRC)) < 1e-12 && Math.abs(surfaceH(SEAM - 5) - surfaceH(SEAM - 5 + CIRC)) < 1e-12, `${step.toFixed(4)} ${dmax.toFixed(3)}`);
+    ok('the field repeats after one circumference', per === 0 && canonX(CIRC + 5) === 5 && Math.abs(homeDist(CIRC - 30) - 30) < 1e-9, String(per));
+    const a = slotStruct(1), b = slotStruct(57), far = slotStruct(27); ok('structures go round, the main hive is on the antipode', a.id === b.id && Math.abs(b.x - a.x - CIRC) < 1e-9 && b.stamps.length === a.stamps.length && far && far.main && far.kind === 'hive' && Math.abs(far.x - CIRC / 2) < 1e-9 && far.chambers.length > a.chambers.length && Math.abs(homeDist(far.x) - CIRC / 2) < 1e-9);
+    planet.reset(); const n0 = planet.shifts; let x = 0, turned = 0, maxJump = 0, charts = new Set(), prev = planet.toCart(0, 0); for (let i = 0; i < CIRC / 2; i++) { x = planet.update(x + 2); charts.add(planet.chart); const c = planet.toCart(x, 0); maxJump = Math.max(maxJump, Math.hypot(c[0] - prev[0], c[1] - prev[1])); prev = c; turned += 2 / RAD; }
+    ok('a walk round the planet comes home', Math.abs(planet.dx(0, x)) < 1e-6 && charts.size === 2 && maxJump < 2.001 && Math.abs(turned - TAU) < 1e-9 && planet.shifts > n0 && Math.abs(planet.lon(CIRC / 4) - 90) < 1e-9, `${x} ${maxJump}`); planet.reset(); planet.update(P.x, true); }
+  // 25 mass is conserved where the planet's seam and its far side are, as anywhere: what a brush removes is what is gone
+  { let worst = 0; for (const x of [SEAM, CIRC / 2, SEAM + CIRC - 40]) { const y = surfaceH(x) - 6, box = [x - 3, y - 3, x + 3, y + 3]; world.box(x - 4, y - 4, x + 4, y + 4, 1, M.BASALT); const m0 = world.mass(...box), acc = {}; world.dig(x, y, 1.3, 0, acc); const m1 = world.mass(...box); for (const k of new Set([...Object.keys(m0), ...Object.keys(acc)])) worst = Math.max(worst, Math.abs((m0[k] || 0) - (m1[k] || 0) - (acc[k] || 0))); if (!(acc[M.BASALT] > 100)) worst = 1; }
+    const d1 = world.saveDiff(), moved = {}; for (const k in d1) moved[+k + 504 * 65536] = d1[k]; const s0 = world.sample(Math.round(SEAM / CELL), Math.round((surfaceH(SEAM) - 6) / CELL)); world.loadDiff(moved); const s1 = world.sample(Math.round(SEAM / CELL), Math.round((surfaceH(SEAM) - 6) / CELL));
+    ok('mass conservation across the seam and the far side', worst < 1e-6 && s0 === s1 && s0 < 128, `${worst} ${s0} ${s1}`); world.reset(); }
+  // ---- round 4: the automation loop -----------------------------------------------------------------------------
+  // 26 the queue: what helps the base expand first, then placement order; the player's arrows override both
+  { const gh = [['wall', 1], ['belt', 2], ['furnace', 3], ['antenna', 4], ['pad', 5], ['furnace', 6], ['miner', 7], ['hub', 8]].map(([kind, id]) => ({ kind, id })), o = queueOrder(gh).map(g => g.kind + g.id).join(' ');
+    const keep = SBP.ghosts.splice(0); SBP.ghosts.push(...gh); bump(gh[0], -2); const o2 = queueOrder(gh)[0], w = gh[4]; bump(w, -1); const o3 = queueOrder(gh).map(g => g.id).join(''); bump(gh[3], 1); const o4 = queueOrder(gh).map(g => g.id).join(''); SBP.ghosts.length = 0; SBP.ghosts.push(...keep);
+    ok('queue priority: expansion first, then placement order', o === 'antenna4 hub8 miner7 furnace3 furnace6 belt2 pad5 wall1', o);
+    ok('the player reorders the queue', o2 === gh[0] && o3 === '14873652' && o4 === '18473652', `${o3} ${o4}`);
+    const fur = new Set(['furnace']), ship = new Set(['ship']), b2 = [{ id: 1, item: 'furnace', n: 1 }, { id: 2, item: 'furnace', n: 1 }, { id: 3, item: 'miner', n: 1 }];
+    const p1 = planAll({ furnace: 1, basalt: 40, 'iron ore': 30 }, { iron: 5 }, b2, {}, fur), p2 = planAll({ furnace: 1 }, {}, b2, {}, ship), p3 = planAll({ iron: 14 }, { iron: 10 }, [b2[2]], {}, ship);
+    ok('orders are met in queue order and their inputs become demand', p1.status[1] === 'stock' && p1.status[2] === 'make' && p1.status[3] === 'make' && p1.orders.map(q => q.item).join() === 'furnace,miner,iron' && p1.orders[2].producer === 'furnace' && p1.orders[1].producer === 'suit' && Math.abs(p1.orders[2].need - 19) < 1e-9 && Math.abs(p1.orders[2].inputs['iron ore'] - 30.4) < 1e-9 && Math.abs(p1.short['iron ore'] - 0.4) < 1e-9, JSON.stringify([p1.status, p1.orders.map(q => [q.item, q.need]), p1.short]));
+    ok('what nobody has is named as the bottleneck', p2.status[1] === 'stock' && p2.status[2] === 'short:basalt' && p2.status[3] === 'short:iron ore' && p2.short.basalt === 40 && p2.orders[0].producer === 'ship' && p3.status[3] === 'make' && p3.orders.length === 2 && p3.orders[0].why === 'build' && p3.orders[1].item === 'iron' && p3.orders[1].why === 'stock', JSON.stringify([p2.status, p2.short, p3.orders.map(q => q.item)])); }
+  // 27 a route: robots or a belt, from distance, throughput, the ground, the fleet, danger and power
+  { const base = { dist: 5, rise: 0, rate: 0.62, robots: 2, blocked: 0, danger: 0, powerFree: 20000 }, R = q => chooseRoute({ ...base, ...q }), a = R({}), far = R({ dist: 60 }), hill = R({ rise: 1.5 }), rock = R({ blocked: 3 }), hv = R({ danger: 1 }), thin = R({ dist: 30, rate: 0.05 }), busy = R({ dist: 30, rate: 6 }), none = R({ robots: 0, dist: 30 }), dark = R({ powerFree: 100 }), idle = R({ rate: 0 });
+    ok('a short steady flow on level ground gets a belt', a.mode === 'belt' && a.cells === 10 && Math.abs(a.iron - 7.5) < 1e-9 && a.beltRate > a.robotRate * 0.5 && busy.mode === 'belt' && none.mode === 'belt', JSON.stringify([a.mode, a.why, busy.why]));
+    ok('robots carry what a belt is not worth, or cannot reach', far.mode === 'robot' && hill.mode === 'robot' && rock.mode === 'robot' && hv.mode === 'robot' && thin.mode === 'robot' && dark.mode === 'robot' && idle.mode === 'none' && [far, hill, rock, hv, thin, dark].every(q => q.why.length > 20) && new Set([far, hill, rock, hv, thin, dark].map(q => q.why)).size === 6 && far.trip > a.trip * 4 && far.robotRate < a.robotRate / 4, JSON.stringify([far.why, thin.why])); }
   save.apply({ version: 3, data: d0 }); S.crash = undefined;
   const msg = fails.length ? `tests FAIL ${fails.length}/${n}: ${fails.join('; ')}` : `tests ok ${n}`;
   console.log(msg); window.__tests = msg;

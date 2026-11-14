@@ -4,7 +4,7 @@
 // its matter falls to the ground as loose material. It throws light into the light field.
 import { hash, rng, rand, clamp } from '../core.js';
 import { world, CELL, CH, TS, M } from './world.js';
-import { biome, lushness } from './gen.js';
+import { biome, lushness, CIRC } from './gen.js';
 import { light } from './light.js';
 import { heat } from './heat.js';
 import { S, mul } from './state.js';
@@ -17,25 +17,26 @@ const YIELD = { tree: { biomass: 30, fibre: 6, resin: 2 }, fern: { biomass: 1.6,
 const natural = k => k >= M.SOIL && k <= M.LUMEN, grows = k => natural(k) || k === M.XENO || k === M.CONCRETE;
 const pick = (h, table) => { let a = 0; for (let i = 0; i < table.length; i += 2) { a += table[i + 1]; if (h < a) return table[i]; } return null; };
 function build(cx, cy) {
-  const out = [], sI = cx * CH, sJ = cy * CH;
+  // wi is the sample column counted round the planet, so the same plants stand at x and at x + CIRC
+  const out = [], sI = cx * CH, sJ = cy * CH, NI = CIRC / CELL, wcx = ((cx % (NI / CH)) + NI / CH) % (NI / CH);
   for (let c = 0; c < 32; c++) {
-    const i = sI + c * 2 + 1, x = i * CELL, lush = lushness(x), bi = biome(x); let prev = world.sample(i, sJ + CH) >= 128;
+    const i = sI + c * 2 + 1, wi = ((i % NI) + NI) % NI, x = i * CELL, lush = lushness(x), bi = biome(x); let prev = world.sample(i, sJ + CH) >= 128;
     for (let j = CH - 1; j >= 0; j--) {
       const iy = sJ + j, sol = world.sample(i, iy) >= 128;
       if (sol !== prev) {
-        const y = sol ? (iy + 1) * CELL - 0.06 : (iy + 0.6) * CELL, k = world.sampleM(i, iy + (sol ? 0 : 1)) & 127, cave = (world.sampleM(i, iy + (sol ? 2 : -2)) & 128) !== 0, h1 = hash(i, iy, 80), h2 = hash(i, iy, 81), id = i + ',' + iy;
+        const y = sol ? (iy + 1) * CELL - 0.06 : (iy + 0.6) * CELL, k = world.sampleM(i, iy + (sol ? 0 : 1)) & 127, cave = (world.sampleM(i, iy + (sol ? 2 : -2)) & 128) !== 0, h1 = hash(wi, iy, 80), h2 = hash(wi, iy, 81), id = wi + ',' + iy;
         if (grows(k) && !flora.dead.has(id) && lush > 0.02) {
           const d = natural(k) ? lush : lush * 0.45; let type = null, front = h2 < 0.1;
           if (sol && !cave) {
-            if (c % 8 === Math.floor(hash(cx, cy, 82) * 8) % 8 && natural(k) && h1 < 0.3 + d * 0.45) { type = 'tree'; front = h2 < 0.07; }
+            if (c % 8 === Math.floor(hash(wcx, cy, 82) * 8) % 8 && natural(k) && h1 < 0.3 + d * 0.45) { type = 'tree'; front = h2 < 0.07; }
             else type = pick(h1, ['bulb', 0.06 * d, 'fern', 0.2 * d, 'paddle', 0.1 * d, 'reed', bi === 2 ? 0.1 * d : 0.03 * d, 'flower', 0.035 * d, 'fungi', bi === 0 ? 0.08 * d : 0.03 * d, 'root', 0.05 * d, 'moss', 0.1, 'grass', 0.42]);
           } else if (sol) type = pick(h1, ['fungi', 0.14 * d, 'bulb', 0.05 * d, 'fern', 0.08 * d, 'moss', 0.14 * d, 'root', 0.04 * d, 'grass', 0.3 * d]);
           else type = pick(h1, ['vine', 0.2 * d, 'threads', 0.12 * d, 'pod', natural(k) ? 0.04 * d : 0]);
           if (type === 'tree' && (world.dens(x, y + 2.5) > 0 || world.dens(x, y + 5) > 0)) type = 'fern';
           if (type === 'grass' || type === 'moss' || type === 'reed') front = h2 < 0.45;
           if (flora.clear && x > flora.clear[0] && x < flora.clear[1] && type !== 'grass' && type !== 'moss' && !(!sol)) type = 'grass';
-          if (type) { const gen = genPlant(type, bi, rng(Math.floor(h1 * 1e9) ^ (i * 7919)), lush, sol ? null : { anchor: -1 });
-            out.push({ id, type, x: x + (h2 - 0.5) * 0.15, y, bi, front, gen, anchor: gen.anchor, hp: gen.hp, top: y + gen.top, hw: gen.hw, H: gen.H, ph: hash(i, iy, 91) * 6.28, fall: 0, b: 0, bv: 0, shake: 0 }); }
+          if (type) { const gen = genPlant(type, bi, rng(Math.floor(h1 * 1e9) ^ (wi * 7919)), lush, sol ? null : { anchor: -1 });
+            out.push({ id, type, x: x + (h2 - 0.5) * 0.15, y, bi, front, gen, anchor: gen.anchor, hp: gen.hp, top: y + gen.top, hw: gen.hw, H: gen.H, ph: hash(wi, iy, 91) * 6.28, fall: 0, b: 0, bv: 0, shake: 0 }); }
         }
       }
       prev = sol;
@@ -45,10 +46,11 @@ function build(cx, cy) {
 }
 let scanT = 0;
 export function stepFlora(dt) {
-  const cam = S.cam, hw = 14 / S.zoom + 8, x0 = Math.floor((cam.x - hw) / 8), x1 = Math.floor((cam.x + hw) / 8), y0 = Math.floor((cam.y - 26) / 8), y1 = Math.floor((cam.y + 11) / 8);
+  const cam = S.cam, zo = Math.min(S.zo, 3.4), hw = (14 / S.zoom + 8) * zo, x0 = Math.floor((cam.x - hw) / 8), x1 = Math.floor((cam.x + hw) / 8), y0 = Math.floor((cam.y - 26 - 8 * (zo - 1)) / 8), y1 = Math.floor((cam.y + 11 + 8 * (zo - 1)) / 8);
+  if (S.zo > 12) { active = []; flora.count = 0; return; }
   active = [];
   for (let cy = y0; cy <= y1; cy++) for (let cx = x0; cx <= x1; cx++) { const k = cx * 4096 + cy; let b = blocks.get(k); if (!b) { b = build(cx, cy); blocks.set(k, b); } for (const p of b) active.push(p); }
-  if (blocks.size > 220) for (const k of blocks.keys()) { const cx = Math.round(k / 4096); if (Math.abs(cx - (x0 + x1) / 2) > 8) blocks.delete(k); if (blocks.size < 160) break; }
+  if (blocks.size > 420) for (const k of blocks.keys()) { const cx = Math.round(k / 4096); if (Math.abs(cx - (x0 + x1) / 2) > 8 * zo) blocks.delete(k); if (blocks.size < 300) break; }
   flora.count = active.length;
   // falling, uprooted and scorched plants
   scanT -= dt; const scan = scanT <= 0; if (scan) scanT = 0.4;
@@ -86,7 +88,7 @@ export function floraHit(x, y, dmg, r = 0.3) {
 export function floraBlast(x, y, r, k) { for (const p of active) { const dx = p.x - x, dy = p.y - y; if (Math.abs(dx) < r && Math.abs(dy) < r + p.H) p.bv += (dx >= 0 ? 1 : -1) * k * (1 - Math.abs(dx) / r) / (1 + p.H * 0.25); } }
 let lastT = 0;
 export function drawFlora(b, time, front) {
-  const cam = S.cam, hw = 14 / S.zoom + 9, dt = front ? 0 : clamp(time - lastT, 0, 0.05); if (!front) lastT = time;
+  const cam = S.cam, hw = (14 / S.zoom + 9) * Math.min(S.zo, 3.4), dt = front ? 0 : clamp(time - lastT, 0, 0.05); if (!front) lastT = time;
   for (const p of active) {
     if (p.gone || Math.abs(p.x - cam.x) > hw) continue;
     if (dt) {     // the spring: wind pulls, the stem pulls back, pushers shove

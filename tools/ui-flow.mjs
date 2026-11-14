@@ -1,7 +1,7 @@
 // tools/ui-flow.mjs: drives the real page with mouse and keys (headless Chromium, software GL): inventory split, drag and
 // drop, suit printer queue, blueprint ghost, combat fire (the round 2 kit, a dev scenario); then the round 3 start: the
 // laser off its hardpoint, the reactor out of its bay, cutting, gathering, dropping, the turret; then title -> new game
-// -> save -> reload -> continue with the same state hash. Prints three JSON lines and exits 1 on any console error.   usage: npm run build && node tools/ui-flow.mjs
+// -> save -> reload -> continue with the same state hash. Then the round 4 flow (D). Prints four JSON lines and exits 1 on any console error.   usage: npm run build && node tools/ui-flow.mjs
 import http from 'node:http'; import fs from 'node:fs'; import path from 'node:path';
 import puppeteer from 'puppeteer-core'; import { fileURLToPath } from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'), dist=path.join(root,'dist'), port=5232, MIME={'.html':'text/html','.js':'text/javascript'};
@@ -40,7 +40,7 @@ await page.keyboard.press('e'); await W(`${D}.K.laser.state==="held"`);
 await page.keyboard.down('d'); await W(`${D}.P.x>0.5`); await page.keyboard.up('d'); await sleep(1500);      // out of reach of the cable from the bay: the suit bus alone
 await page.mouse.move(1150,640); await page.mouse.down(); await sleep(4000); await page.mouse.up(); const cNo=await page.evaluate(`[${D}.S.stats.dug, +${D}.K.laser.frac.toFixed(3)]`);
 await page.keyboard.down('a'); await W(`${D}.P.x<-7.7`); await page.keyboard.up('a'); await sleep(1500);
-await page.keyboard.press('e'); await W(`${D}.K.reactor.state==="carried"`); const cLoad=await page.evaluate(`[Math.round(${D}.P.load), +${D}.P.mob.speed.toFixed(2), ${D}.P.mob.jet<8.7]`);
+await page.keyboard.press('e'); await W(`${D}.K.reactor.state==="carried"`); await W(`${D}.P.load>150`); const cLoad=await page.evaluate(`[Math.round(${D}.P.load), +${D}.P.mob.speed.toFixed(2), ${D}.P.mob.jet<8.7]`);
 await page.mouse.move(1150,640); await page.mouse.down(); await W(`${D}.S.stats.dug>20`); await page.mouse.up(); await W(`${D}.matter.list.length>0`);
 await page.evaluate(`${D}.matter.spawn("basalt", 6, ${D}.P.x+0.4, ${D}.P.y+0.5)`); await page.keyboard.down('v'); await W(`${D}.S.count("basalt")>=5.99`); await page.keyboard.up('v');
 const n0=await page.evaluate(`${D}.matter.total("basalt")`); const bi=await page.evaluate(`${D}.S.inv.slots.findIndex(s=>s&&s.id==="basalt")`); await page.keyboard.press(String(bi+1)); await sleep(1500); await page.keyboard.press('x'); await W(`${D}.S.count("basalt")<0.01`); const cDrop=await page.evaluate(`[+(${D}.matter.total("basalt")-${n0}).toFixed(3)]`);
@@ -48,6 +48,22 @@ await page.keyboard.press('g'); await W(`${D}.K.laser.state==="turret"`); await 
 const cEnd=await page.evaluate(`[${D}.K.laser.state, ${D}.K.reactor.state, !!${D}.K.laser.link, ${D}.K.laser.reach, Math.round(${D}.P.load)]`);
 await page.screenshot({path:path.join(root,'docs/shots/kit-flow.png')});
 console.log(JSON.stringify({start:c0, noReactor:cNo, carrying:cLoad, dropped:cDrop, end:cEnd, errs})); bad += errs.length + (cNo[0]===0 && cNo[1]<0.6 && cDrop[0]===6 && cEnd[0]==='turret' && cEnd[1]==='ground' ? 0 : 1);
+// D: round 4, with real keys: place a chest frame with no kit anywhere (b, 5, click), open the ship AI (j), raise the iron
+// target with the editor's +, move the order to the front with its arrow, close; the AI has the kit made and a robot
+// builds it. Then m: out to the whole planet and back.
+errs.length=0; await page.goto(U+'?act=surface&scenario=supply',{waitUntil:'load'}); await page.waitForFunction('window.__ready===true',{timeout:120000});
+await page.keyboard.press('b'); await W(`${D}.S.mode==="blueprint"`); await page.keyboard.press('5'); await sleep(1500); await page.keyboard.press('1'); await sleep(1500); await page.keyboard.press('5'); await W(`${D}.BP.sel===4`);
+await page.mouse.move(620,512); await W(`Math.abs(${D}.S.cam.x-(${D}.P.x+(620-800)/${D}.S.ppm*0.22))<0.04 && Math.floor(${D}.S.mouse.y*2)===0`); await page.mouse.down(); await sleep(2500); await page.mouse.up(); await W(`${D}.BP.ghosts.some(g=>g.kind==="chest")`);      // free level ground between the furnace and the antenna
+const d0=await page.evaluate(`[${D}.BP.ghosts.map(g=>g.kind+(g.have?"+kit":"")).join(), ${D}.S.count("chest"), ${D}.SUP.targets.iron]`);
+await page.keyboard.press('b'); await page.keyboard.press('j'); await page.waitForSelector('#win.ai [data-a="tg-inc"][data-i="iron"]',{timeout:60000}); await page.waitForSelector('#win.ai [data-a="q-top"]',{timeout:60000});
+[x,y]=await box('#win.ai [data-a="tg-inc"][data-i="iron"]'); await page.mouse.click(x,y); await W(`${D}.SUP.targets.iron===35`);
+[x,y]=await box('#win.ai [data-a="q-top"]'); await page.mouse.click(x,y); await sleep(1500);
+const d1=await page.evaluate(`[${D}.SUP.targets.iron, document.querySelectorAll('#win.ai .qr').length, document.querySelector('#win.ai .qr .qw').textContent.slice(0,60)]`);
+await page.screenshot({path:path.join(root,'docs/shots/ai-flow.png')});
+await page.keyboard.press('Escape'); await W(`${D}.S.uiOpen===false`); for (let i=0;i<60 && !(await page.evaluate(`${D}.F.machines.some(m=>m.kind==="chest")`));i++) await page.evaluate('window.__dev.step(240)');      // software GL runs the game at a fifteenth of real time: the wait is stepped, two game seconds at a time
+const d2=await page.evaluate(`[${D}.F.machines.map(m=>m.kind).join(), ${D}.BP.ghosts.length]`);
+await page.keyboard.press('m'); await W(`${D}.S.zo>60`); const d3=await page.evaluate(`[Math.round(${D}.S.zo), Math.round(${D}.S.cam.y)]`); await page.keyboard.press('m'); await W(`${D}.S.zo<1.2`);
+console.log(JSON.stringify({placed:d0, ai:d1, built:d2, planet:d3, errs})); bad += errs.length + (d0[1]===0 && d1[0]===35 && /chest/.test(d2[0]) && d3[0]>60 && d3[1]<-600 ? 0 : 1);
 // B: title, new game, save, reload, continue
 errs.length=0; await page.goto(U,{waitUntil:'load'}); await page.waitForSelector('#title [data-a="t-new"]',{timeout:120000});
 const t0=await page.evaluate(`[!!document.querySelector('[data-a="t-continue"]'), window.__dev.G.paused]`);

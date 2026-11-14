@@ -6,7 +6,10 @@ import { iconUrl } from './icons.js';
 import { ITEMS, RECIPES, RECIPE, SUIT_SLOW, CARRY, EPS, inv, fmtAmt, fmtCost, printerQueue, printerCancel } from './items.js';
 import { S } from './surface/state.js';
 import { F, DEFS, give, accepts, quickTransfer, ROCKET_PARTS } from './surface/factory.js';
-import { BP, BUILD, costOf } from './surface/blueprint.js';
+import { BP, BUILD, costOf, cancelGhost } from './surface/blueprint.js';
+import { SUP, setTarget, targetStep } from './surface/supply.js';
+import { AUTO, queueView, bump, AUX_W } from './surface/auto.js';
+import { robots, ROBOT, CRAWLER } from './surface/robots.js';
 import { STORY } from './story.js';
 
 const CSS = `
@@ -29,12 +32,18 @@ const CSS = `
 #title{position:absolute;inset:0;display:none;background:rgba(2,3,5,.86);pointer-events:auto;flex-direction:column;align-items:center;justify-content:center;gap:10px}
 #title h1{font:300 22px ui-monospace,Menlo,Consolas,monospace;letter-spacing:.5em;color:rgba(214,226,233,.9);margin:0 0 26px}
 #title .btn{min-width:220px;text-align:center;padding:9px 14px;margin:0;font-size:11px} #title .sub{color:rgba(159,179,191,.4);margin-top:18px;text-align:center;line-height:1.9}
+#win.ai{top:50%;max-height:92vh}
+.qr{display:flex;align-items:center;gap:8px;height:24px;border-top:1px solid rgba(159,179,191,.08);white-space:nowrap} .qr .qn{width:16px;color:rgba(159,179,191,.4);text-align:right}
+.qr .qi{width:20px;height:20px;background:center/100% no-repeat;flex:none} .qr .qk{width:104px;color:rgba(214,226,233,.9)} .qr .qk i,.qr .qw i{font-style:normal;color:rgba(46,242,208,.7);font-size:8px}
+.qr .qw{flex:1;color:rgba(159,179,191,.6);overflow:hidden;text-overflow:ellipsis;min-width:250px;max-width:430px} .qr .qw.warn{color:rgba(255,179,71,.85)} .qr .qv{width:120px;text-align:right;color:rgba(214,226,233,.85)}
+.qb{width:18px;height:18px;line-height:17px;text-align:center;border:1px solid rgba(159,179,191,.25);cursor:pointer;color:rgba(159,179,191,.8);flex:none;letter-spacing:0} .qb:hover{border-color:rgba(255,179,71,.8);color:rgba(255,179,71,.95)}
+.note{color:rgba(159,179,191,.38);margin-top:8px;max-width:640px;white-space:normal;line-height:1.6}
 #bpinfo{position:absolute;left:50%;bottom:80px;transform:translateX(-50%);white-space:nowrap;color:rgba(159,179,191,.6)}
 `;
 let root, bar, win, tip, heldEl, title, bpinfo, held = null, sig = '', downAt = null, mx = 0, my = 0;
 const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html) e.innerHTML = html; return e; };
 const slotHtml = (s, a = '', extra = '') => `<div class="slot ${a}" ${extra} ${s ? `style="background-image:url(${iconUrl(s.id)})"` : ''}>${s ? `<span class="n">${fmtAmt(s.id, s.n)}</span>` : ''}`;
-export const ui = { open: false,
+export const ui = { open: false, ai: false,
   init() {
     const st = el('style'); st.textContent = CSS; document.head.appendChild(st);
     root = el('div'); root.id = 'ui'; document.body.appendChild(root);
@@ -45,14 +54,16 @@ export const ui = { open: false,
     root.addEventListener('contextmenu', e => e.preventDefault());
     addEventListener('mousemove', e => { mx = e.clientX; my = e.clientY; const t = e.target.closest && e.target.closest('[data-tip]'); if (t) { tip.textContent = t.dataset.tip; tip.style.display = 'block'; tip.style.left = Math.min(innerWidth - 440, mx + 16) + 'px'; tip.style.top = (my + 18) + 'px'; } else tip.style.display = 'none'; heldEl.style.left = (mx - 26) + 'px'; heldEl.style.top = (my - 26) + 'px'; });
   },
-  toggle(force) { this.open = force === undefined ? !this.open : force; if (!this.open) { if (held) { const left = inv.add(S.inv, held.id, held.n); if (left > EPS) { S.drop(held.id, left); S.say(held.id + ' dropped at your feet'); } held = null; } S.open = null; } S.uiOpen = this.open; sig = ''; },
+  // J: the ship AI's window (build queue, stock targets, logistics) in place of the inventory
+  toggleAI(force) { const on = force === undefined ? !(this.open && this.ai) : force; this.ai = on; S.aiOpen = on; this.toggle(on); this.ai = on; S.aiOpen = on; },
+  toggle(force) { this.open = force === undefined ? !this.open : force; if (!this.open || force === undefined) { this.ai = false; S.aiOpen = false; } if (!this.open) { if (held) { const left = inv.add(S.inv, held.id, held.n); if (left > EPS) { S.drop(held.id, left); S.say(held.id + ' dropped at your feet'); } held = null; } S.open = null; } S.uiOpen = this.open; sig = ''; },
   openMachine(m) { S.open = m; this.toggle(true); },
   // called every frame while Act 1 is on screen
   update(visible) {
     root.style.display = visible ? 'block' : 'none'; if (!visible) return;
     if (S.uiOpen !== this.open) { this.open = S.uiOpen; sig = ''; }
     const P = S.P, bp = S.mode === 'blueprint', q = S.printer.q;
-    const s2 = JSON.stringify([S.inv.slots, P.slot, S.mode, this.open, S.open && [S.open.kind, S.open.inv && S.open.inv.slots, S.open.inp, S.open.out, S.open.recipe, S.open.n, S.open.drones], held, bp && [BP.sel, BP.tool, BP.rot], q.map(j => [j.r, Math.round(j.left)]), this.open && Math.round(inv.mass(S.inv)), this.open && [Math.round(P.bat.wh), Math.round(P.o2 * 100), Math.round(P.prop * 10)]]);
+    const s2 = JSON.stringify([S.inv.slots, P.slot, S.mode, this.open, S.open && [S.open.kind, S.open.inv && S.open.inv.slots, S.open.inp, S.open.out, S.open.recipe, S.open.n, S.open.drones], held, bp && [BP.sel, BP.tool, BP.rot], q.map(j => [j.r, Math.round(j.left)]), this.open && Math.round(inv.mass(S.inv)), this.open && [Math.round(P.bat.wh), Math.round(P.o2 * 100), Math.round(P.prop * 10)], this.ai && aiSig()]);
     if (s2 === sig) return; sig = s2;
     // hotbar, or the blueprint bar
     if (bp) {
@@ -64,7 +75,8 @@ export const ui = { open: false,
       bar.innerHTML = S.inv.slots.slice(0, 9).map((s, i) => slotHtml(s, i === P.slot ? 'sel' : '', `data-a="slot" data-c="p" data-i="${i}" ${s ? `data-tip="${tipOf(s)}"` : ''}`) + `<span class="k">${i + 1}</span></div>`).join(''); bpinfo.textContent = '';
     }
     heldEl.style.display = held ? 'block' : 'none'; if (held) { heldEl.style.backgroundImage = `url(${iconUrl(held.id)})`; heldEl.innerHTML = `<span class="n">${fmtAmt(held.id, held.n)}</span>`; }
-    win.style.display = this.open ? 'flex' : 'none'; if (!this.open) return;
+    win.style.display = this.open ? 'flex' : 'none'; win.className = this.ai ? 'ai' : ''; if (!this.open) return;
+    if (this.ai) { win.innerHTML = aiPanels(); return; }
     const grid = (I, c, cols, from = 0, to = I.slots.length) => `<div class="grid g${cols}">` + I.slots.slice(from, to).map((s, i) => slotHtml(s, '', `data-a="slot" data-c="${c}" data-i="${i + from}" ${s ? `data-tip="${tipOf(s)}"` : ''}`) + '</div>').join('') + '</div>';
     let h = '';
     const m = S.open;
@@ -102,6 +114,26 @@ function machinePanel(m) {
     if (m.kind === 'miner') h += `<div class="row" style="margin-top:6px"><span>bit depth</span><b>${(m.depth || 0).toFixed(1)} m</b></div>`; }
   return h + `<span class="btn" data-a="xfer">put in / take out</span><div class="row" style="margin-top:6px;color:rgba(159,179,191,.35)"><span>click here holding a stack to put it in</span></div></div>`;
 }
+// ---- the ship AI's window: the queue with its reasons and its arrows, the stock targets with their editor, logistics
+const fmtN = (id, n) => ITEMS[id].u === 'ea' || ITEMS[id].u === 'rd' ? String(Math.round(n)) : n.toFixed(1) + ' kg';
+const aiSig = () => [queueView(robots).map(q => [q.g.id, q.why]), SUP.targets, Object.keys(SUP.targets).map(k => Math.round((SUP.stock && SUP.stock[k] || 0) * 2)), SUP.orders.map(o => o.note), AUTO.routes.map(r => [r.key, r.mode, r.why, Math.round(r.rate * 20), r.missing]), Math.round(AUTO.power.used / 100), Math.round(AUTO.power.supply / 100), robots.map(r => [r.state, Math.round(r.wh)])];
+function aiPanels() {
+  const qv = queueView(robots), st = SUP.stock || {}, pw = AUTO.power, B = (a, i, ch, tip) => `<span class="qb" data-a="${a}" data-i="${i}" data-tip="${tip}">${ch}</span>`;
+  let h = `<div><div class="pan" style="min-width:660px"><h4>ship ai: build queue<b>${qv.length} order${qv.length === 1 ? '' : 's'}</b></h4>`
+    + (qv.length ? qv.slice(0, 12).map(q => `<div class="qr"><span class="qn">${q.n}</span><span class="qi" style="background-image:url(${iconUrl(q.kind === 'wall' ? 'iron' : q.kind)})"></span><span class="qk">${q.kind}${q.auto ? ' <i>ai</i>' : ''}${q.manual ? ' <i>moved</i>' : ''}</span><span class="qw ${/waits for|outside|no power/.test(q.why) ? 'warn' : ''}">${q.why}</span>${B('q-top', q.g.id, '&#8679;', 'build this first')}${B('q-up', q.g.id, '&#8593;', 'one place earlier')}${B('q-dn', q.g.id, '&#8595;', 'one place later')}${B('q-x', q.g.id, '&#215;', 'cancel the order')}</div>`).join('') + (qv.length > 12 ? `<div class="qr"><span class="qw">and ${qv.length - 12} more</span></div>` : '')
+      : '<div class="qr"><span class="qw">nothing queued. b, then place anything: the ai orders the kit, has it made, carried and built</span></div>')
+    + `<div class="note">order of service: what lets the base expand (network and robots, then mining, smelting, assembly, storage, belts), then the order you placed them. the arrows override it.</div></div><div class="sep"></div>`;
+  h += `<div class="pan"><h4>logistics: how it moves, and why<b>base grid ${(pw.used / 1000).toFixed(1)} / ${(pw.supply / 1000).toFixed(1)} kw</b></h4><div class="qr"><span class="qk">power</span><span class="qw ${pw.demand > pw.supply + 1 ? 'warn' : ''}">${pw.note || 'no source'}${pw.demand > pw.supply + 1 ? `: ${(pw.demand / 1000).toFixed(1)} kw wanted, the last in line run slow` : ''}${pw.off ? `   ${pw.off} machine${pw.off > 1 ? 's' : ''} off the grid` : ''}</span></div>`
+    + (AUTO.routes.length ? AUTO.routes.map(r => `<div class="qr"><span class="qi" style="background-image:url(${iconUrl(r.item)})"></span><span class="qk">${r.src.kind} &gt; ${r.dst ? r.dst.kind : 'hold'}</span><span class="qw">${r.why}${r.mode === 'belt' ? (r.done ? ' <i>laid</i>' : ` <i>${r.missing} cells queued</i>`) : ''}</span><span class="qv">${r.rate.toFixed(2)} kg/s ${r.dist.toFixed(0)} m</span></div>`).join('') : '<div class="qr"><span class="qw">no steady flow yet: a machine that makes something opens one</span></div>')
+    + robots.map(r => { const j = r.job, kg = inv.mass(r.cargo); return `<div class="qr"><span class="qk">${r.kind === 'crawler' ? 'hauler' : 'drone'} ${r.id}</span><span class="qw">${j && j.kind === 'carry' ? (r.state === 'cfetch' ? 'to ' : 'carrying ') + j.item + ' &gt; ' + (j.dst.t === 'mach' ? j.dst.m.kind : j.dst.t === 'inv' ? 'hold' : j.dst.t === 'dump' ? 'spoil heap' : 'you') + (j.ground ? ' <i>under an overhang</i>' : '') : j ? j.kind + ' ' + (j.ref.kind || 'terrain') : r.state}</span><span class="qv">${kg > 0.05 ? kg.toFixed(0) + ' / ' + (r.kind === 'crawler' ? CRAWLER.cargo : ROBOT.cargo) + ' kg  ' : ''}${(r.wh / (r.kind === 'crawler' ? CRAWLER.wh : ROBOT.wh) * 100).toFixed(0)}%</span></div>`; }).join('')
+    + `<div class="note">robots against a belt: trip time there and back at loaded speed, ${ROBOT.cargo} kg a trip, against cells to build, iron, ${AUX_W / 1000} kw of bus, level ground and what is awake nearby. the ai lays the belt itself when it wins.</div></div></div>`;
+  const cand = RECIPES.map(r => Object.keys(r.out)[0]).concat(['basalt', 'biomass', 'iron ore']).filter(k => !(k in SUP.targets));
+  h += `<div class="pan" style="min-width:430px"><h4>stock targets<b>${SUP.on ? 'the ai keeps these in stock' : 'ai off'}</b></h4>`
+    + Object.keys(SUP.targets).map(k => { const have = st[k] || 0, tg = SUP.targets[k], o = SUP.orders.find(q => q.item === k), sh = AUTO.short[k]; return `<div class="qr"><span class="qi" style="background-image:url(${iconUrl(k)})"></span><span class="qk">${k}</span><span class="qw ${have >= tg - 1e-6 ? '' : 'warn'}" style="min-width:150px">${have >= tg - 1e-6 ? 'in stock' : o ? (o.note || 'ordered') : sh ? 'nobody makes it: ' + sh.toFixed(1) + ' short' : 'coming'}</span><span class="qv">${fmtN(k, have)} / ${fmtN(k, tg)}</span>${B('tg-dec', k, '&#8722;', 'lower the target by ' + targetStep(k) + ' (shift x5)')}${B('tg-inc', k, '+', 'raise the target by ' + targetStep(k) + ' (shift x5)')}${B('tg-del', k, '&#215;', 'stop keeping it in stock')}</div>`; }).join('')
+    + `<div class="sep"></div><div class="row"><span>keep in stock as well</span></div><div class="grid g6">` + cand.map(k => `<div class="slot" data-a="tg-add" data-i="${k}" data-tip="${k}\nclick: keep ${fmtN(k, targetStep(k) * (ITEMS[k].u === 'ea' ? 1 : 4))} in stock" style="background-image:url(${iconUrl(k)})"></div>`).join('') + `</div>`
+    + `<div class="note">under a target is demand. the ai orders it from the machine that makes it, or from the arm, and the inputs of that become demand too, down to raw rock. j or esc closes.</div></div>`;
+  return h;
+}
 const INV = c => c === 'p' ? S.inv : S.open && S.open.inv;
 function act(t, button, shift) {
   const a = t.dataset.a, i = t.dataset.i;
@@ -113,6 +145,11 @@ function act(t, button, shift) {
   else if (a === 'tool') BP.tool = BP.tool === i ? 'place' : i;
   else if (a === 'recipe') { const m = S.open; if (m && !m.busy) { for (const k in m.inp) { S.add(k, m.inp[k]); } m.inp = {}; m.recipe = i; } else S.say('wait for the batch to finish', 2); }
   else if (a === 'xfer') { const m = S.open; if (held && m && accepts(m, held.id)) { held.n = give(m, held.id, held.n); if (held.n <= EPS) held = null; } else if (m) quickTransfer(m); }
+  else if (a === 'q-top' || a === 'q-up' || a === 'q-dn') { const g = BP.ghosts.find(q => q.id === +i); if (g) bump(g, a === 'q-top' ? -2 : a === 'q-up' ? -1 : 1); }
+  else if (a === 'q-x') { const g = BP.ghosts.find(q => q.id === +i); if (g) cancelGhost(g); }
+  else if (a === 'tg-inc' || a === 'tg-dec') setTarget(i, (SUP.targets[i] || 0) + (a === 'tg-inc' ? 1 : -1) * targetStep(i) * (shift ? 5 : 1));
+  else if (a === 'tg-del') setTarget(i, 0);
+  else if (a === 'tg-add') setTarget(i, targetStep(i) * (ITEMS[i].u === 'ea' ? 1 : 4));
   else if (a === 'takeall') { const I = S.open.inv; for (let k = 0; k < I.slots.length; k++) { const s = I.slots[k]; if (s) { const left = S.add(s.id, s.n); S.gain(s.id, s.n - left); I.slots[k] = left > EPS ? { id: s.id, n: left } : null; } } }
   sig = '';
 }

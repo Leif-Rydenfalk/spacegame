@@ -2,17 +2,21 @@
 // per sample), generated on demand as a pure function of (x, y, seed) and then edited with smooth brushes.
 // density byte 128 is the surface; one metre of signed distance is 254 steps, saturating at +-0.5 m.
 import { noise2, clamp } from '../core.js';
-import { CELL, CH, TS, GRAV, SLAB, WALL, M, MAT, surfaceH, natD, oreIron, oreCopper, oreLumen, stampSD, stampBox } from './gen.js';
+import { CELL, CH, TS, GRAV, SLAB, WALL, M, MAT, CIRC, surfaceH, natD, oreIron, oreCopper, oreLumen, stampSD, stampBox, canonX } from './gen.js';
+import { planet } from './planet.js';
 import { structsIn } from './structures.js';
 export { CELL, CH, TS, GRAV, SLAB, WALL, M, MAT, surfaceH };
 const N = CH * CH, LN = CH / 2 + 1, KG = CELL * CELL * SLAB;      // KG * rho = kg in one full sample
 const chunks = new Map(); let lastKey = NaN, last = null;
 const Ld = new Float32Array(LN * LN), Li = new Float32Array(LN * LN), Lc = new Float32Array(LN * LN), Ll = new Float32Array(LN * LN), Lh = new Float32Array(LN), F = new Float32Array(N);
+// the field closes on itself: chunk columns are counted modulo the circumference (504 of them)
+const NCX = CIRC / (CH * CELL), wrapC = cx => ((cx % NCX) + NCX) % NCX;
 const ckey = (cx, cy) => (cx + 32768) * 65536 + (cy + 32768);
 export const cov = b => b <= 112 ? 0 : b >= 144 ? 1 : (b - 112) / 32;      // antialiased coverage of one sample
 
 function genChunk(cx, cy) {
-  const d = new Uint8Array(N), m = new Uint8Array(N), X0 = cx * CH * CELL, Y0 = cy * CH * CELL, W = CH * CELL;
+  // X0 is the chunk's place in the current chart (structures are asked for there); XC is its canonical place (noise)
+  const d = new Uint8Array(N), m = new Uint8Array(N), X0 = planet.fix(cx * CH * CELL), XC = canonX(X0), Y0 = cy * CH * CELL, W = CH * CELL;
   let hmax = -1e9; for (let i = 0; i < LN; i++) { const h = Lh[i] = surfaceH(X0 + i * 0.25); if (h > hmax) hmax = h; }
   const sts = structsIn(X0 - 1, X0 + W + 1).filter(s => s.y1 > Y0 - 1 && s.y0 < Y0 + W + 1);
   if (Y0 > hmax + 1.5 && !sts.length) return { d, m, mod: false };
@@ -23,7 +27,7 @@ function genChunk(cx, cy) {
       if (v > -0.7) { Li[o] = oreIron(x, y); Lc[o] = oreCopper(x, y); Ll[o] = oreLumen(x, y); } else Li[o] = Lc[o] = Ll[o] = 0;
     }
     for (let i = 0; i < CH; i++) {
-      const x = X0 + i * CELL, li = i >> 1, fx = (i & 1) * 0.5, h = Lh[li] + (Lh[li + 1] - Lh[li]) * fx, soil = 1.6 + noise2(x / 2.5, 0, 3) * 1.6, obs = -45 + noise2(x / 15, 0, 4) * 7;
+      const x = XC + i * CELL, li = i >> 1, fx = (i & 1) * 0.5, h = Lh[li] + (Lh[li + 1] - Lh[li]) * fx, soil = 1.6 + noise2(x / 2.5, 0, 3) * 1.6, obs = -45 + noise2(x / 15, 0, 4) * 7;
       for (let j = 0; j < CH; j++) {
         const y = Y0 + j * CELL, lj = j >> 1, fy = (j & 1) * 0.5, o = lj * LN + li, q = j * CH + i, depth = h - y;
         const bl = (A) => { const a = A[o], b = A[o + 1], c = A[o + LN], e = A[o + LN + 1]; return a + (b - a) * fx + (c - a) * fy + (a - b - c + e) * fx * fy; };
@@ -50,6 +54,7 @@ function genChunk(cx, cy) {
   return { d, m, mod: false };
 }
 function chunk(cx, cy) {
+  if (cx < 0 || cx >= NCX) cx = wrapC(cx);
   const key = ckey(cx, cy); if (key === lastKey) return last;
   let c = chunks.get(key);
   if (!c) {
@@ -133,7 +138,8 @@ export const world = {
   sample(ix, iy) { return gd(ix, iy); }, sampleM(ix, iy) { return gm(ix, iy); },
   // edited chunks only, run-length encoded
   saveDiff() { const out = {}; for (const [k, c] of chunks) if (c.mod) out[k] = [rle(c.d), rle(c.m)]; return out; },
-  loadDiff(o) { this.reset(); for (const k in o) chunks.set(+k, { d: unrle(o[k][0]), m: unrle(o[k][1]), mod: true }); },
+  // keys from a flat (round 3) world are folded onto the circle
+  loadDiff(o) { this.reset(); for (const k in o) { const cx = Math.floor(+k / 65536) - 32768, cy = (+k % 65536) - 32768; chunks.set(ckey(wrapC(cx), cy), { d: unrle(o[k][0]), m: unrle(o[k][1]), mod: true }); } },
 };
 function rle(a) { const out = []; for (let i = 0; i < a.length;) { const v = a[i]; let n = 1; while (n < 255 && i + n < a.length && a[i + n] === v) n++; out.push(n, v); i += n; } let s = ''; for (let i = 0; i < out.length; i += 8192) s += String.fromCharCode.apply(null, out.slice(i, i + 8192)); return btoa(s); }
 function unrle(b64) { const s = atob(b64), a = new Uint8Array(N); let o = 0; for (let i = 0; i < s.length; i += 2) { const n = s.charCodeAt(i), v = s.charCodeAt(i + 1); a.fill(v, o, o + n); o += n; } return a; }

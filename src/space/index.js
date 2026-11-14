@@ -21,11 +21,12 @@ function setupOrbit() {
   const rp = b.R + 220e3, ra = b.R + 640e3, a = (rp + ra) / 2, th = Math.atan2(-bs[1], -bs[0]) + 1.9, vp = Math.sqrt(b.mu * (2 / rp - 1 / a));
   me.p = [Math.cos(th) * rp, Math.sin(th) * rp]; me.v = [-Math.sin(th) * vp, Math.cos(th) * vp]; me.ang = th + Math.PI / 2; Sp.ships.push(me); Sp.cam.scale = 30000;
 }
-function setupLaunch(mid) {
+// lon = the pad's longitude on the planet (radians east of the crash site): the rocket stands where the pad really is
+function setupLaunch(mid, lon = 0) {
   const b = bodies[HOME], me = Sp.me = makeShip(BP.rocket, { name: 'rocket', body: HOME }); bodyState(HOME, Sp.t, bs);
-  const th = Math.atan2(-bs[1], -bs[0]) - 1.63; foot = me.com[0] + 4 * CELL + 1.8;
+  const th = Math.atan2(-bs[1], -bs[0]) - 1.63 + lon; Sp.launchLon = lon; foot = me.com[0] + 4 * CELL + 1.8;
   me.p = [Math.cos(th) * (b.R + foot), Math.sin(th) * (b.R + foot)]; me.v = [0, 0]; me.ang = th; me.hold = th; me.landed = true; Sp.ships.push(me);
-  Sp.cam.scale = 0.16; autoZoom = true; launched = true; lock = 0; Sp.pilot = null; events.emit('launch'); Sp.say('z full throttle   p ascent autopilot   a/d steer   . time x2 x4');
+  Sp.cam.scale = 0.16; autoZoom = true; launched = true; lock = 0; Sp.pilot = null; events.emit('launch'); Sp.say(`pad at lon ${Math.abs(lon * 180 / Math.PI).toFixed(1)} ${lon < 0 ? 'w' : 'e'}   z full throttle   p ascent autopilot   a/d steer   . time x2 x4`);
   if (mid) { Sp.pilot = 'ascent'; for (let i = 0; i < 120 * 400 && Math.hypot(me.p[0], me.p[1]) - b.R < 40e3; i++) space.step(1 / 120); }
 }
 function setupBelt(scn) {
@@ -61,9 +62,9 @@ export const space = {
   init() { initView(R.scenes.space); belt.scene = R.scenes.space; Sp.batch = new Batch(R.scenes.space, 20000, 10); save.register('space', { dump: dumpSpace, load: loadSpace }); },
   start(scn, data) {
     Sp.auto = G.auto;
-    if (data && data.launch) setupLaunch(false); else if (scn === 'launch') setupLaunch(true); else if (scn === 'mining' || scn === 'combat') setupBelt(scn); else { setupOrbit(); if (scn === 'builder') Sp.hangar = true; }
+    if (data && data.launch) setupLaunch(false, data.lon); else if (scn === 'launch') setupLaunch(true); else if (scn === 'mining' || scn === 'combat') setupBelt(scn); else { setupOrbit(); if (scn === 'builder') Sp.hangar = true; }
   },
-  enter(data) { if (data && data.launch) { deadT = 0; setupLaunch(false); } },
+  enter(data) { if (data && data.launch) { deadT = 0; setupLaunch(false, data.lon); } },
   step(dt) {
     const me = Sp.me; Sp.msgT -= dt; Sp.flash = Math.max(0, (Sp.flash || 0) - dt * 1.5); G.shake = Math.max(0, G.shake - dt * (0.6 + G.shake * 6));
     if (input.hit('b') && me && !me.dead) { Sp.hangar = !Sp.hangar; audio.play('click'); }

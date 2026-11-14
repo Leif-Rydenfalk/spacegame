@@ -1,6 +1,7 @@
 // the world's noise and pollution. Noise is an event with a level in metres of audible radius that fades in seconds.
 // Pollution accumulates in 8 m cells, spreads to the neighbours and decays slowly. The hivemind reads both.
-const CW = 8, key = (i, j) => (i + 32768) * 65536 + (j + 32768);
+// the cells go round the planet: 504 columns of 8 m
+const CW = 8, NC = 504, key = (i, j) => (((i % NC) + NC) % NC + 32768) * 65536 + (j + 32768);
 export const env = {
   events: [], poll: new Map(), mine: 0, tick: 0,
   // level = radius in metres at which it is still heard. own = made by the player (for the HUD readout)

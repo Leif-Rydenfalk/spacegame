@@ -1,4 +1,14 @@
-# spacegame, demo 1 (round 3: the look and the feel)
+# spacegame, demo 1 (round 4: a whole planet, and a base that builds itself)
+
+Round 4 does two things (Leif's words are in `docs/ROUND4.md`). **The world is a whole round planet**: the ground
+closes on itself, gravity points at the centre for every body, the camera turns with it so down is always the bottom
+of the screen, you can walk or jet all the way round and come back to the wreck, the hive's main base is on the
+antipode, and the view zooms without a cut from the body to the whole disc with its limb of air. **And the base runs
+itself**: you place a frame, anything, anywhere, with no kit in your hands; the ship AI orders the kit, has it made by
+whatever can make it (the wreck's fabricator, a built assembler, the arm on your suit), has it carried and built by
+the robots, in a queue it orders by what helps the base expand and then by what you placed first, and that you can
+reorder. It moves everything else the same way: robots where that is enough, a conveyor it lays itself where the
+route is worth one, and it says why. The rest of this file is round 3's text, updated where round 4 changed it.
 
 One page, two acts, feel first. Act 1 is a side-view survival and factory game on a dark, overgrown, bioluminescent
 world. Round 3 is a vertical slice of it, about ten minutes from a new start, built to set the look of the whole
@@ -55,6 +65,16 @@ it also names a slot (`&slot=name`, and `&continue=1` to load it).
 | `?act=surface&scenario=combat` | dev: an attack wave of all six hive species and the round 2 rifle and shotgun (`&auto=1` aims and fires) |
 | `?act=surface&scenario=oldkit` | dev: the round 2 kit (rifle, shotgun), used by the interface test |
 | `?act=surface&scenario=ruins` / `base` / `hive` | at an alien ruin, a locked-down outpost, an alert hive mouth |
+| `?act=surface&scenario=planet` | **round 4**: zoomed all the way out: the whole planet, the limb, the giant behind it |
+| `?act=surface&scenario=horizon` | round 4: thirteen times out, the ground is a curve |
+| `?act=surface&scenario=far90&auto=1` | round 4: 95 degrees east of the crash site and walking on; the camera has turned with gravity |
+| `?act=surface&scenario=seam&auto=1` | round 4: walking west across the place where the two charts of the planet meet |
+| `?act=surface&scenario=antipode` | round 4: the far side: the mouth of the hive's main base |
+| `?act=surface&scenario=autobuild` | round 4: four frames placed with no kit anywhere; the AI has them made, carried and built (`&t=75`) |
+| `?act=surface&scenario=queue` | round 4: the same, with the ship AI window open: build queue, logistics, stock targets |
+| `?act=surface&scenario=conveyor` | round 4: a furnace and an assembler on level ground: the AI lays the belt; a far furnace gets robots (`&t=40`) |
+| `?act=surface&scenario=overhang` | round 4: ore under a ledge: the ground hauler walks in (`&t=9`) |
+| `?act=surface&scenario=targets` | round 4: the stock-target editor |
 | `?act=space&scenario=launch` | the rocket at 40 km on the ascent autopilot |
 | `?act=space` | a 220 x 640 km orbit around the home moon in the 12-part scout, 1,770 m/s of delta-v |
 | `?act=space&scenario=mining` | beside a belt asteroid with a mining platform, the depot and two haulers |
@@ -78,9 +98,74 @@ shots), `slot=name`, `continue=1`. `F1` in the game opens the dev menu with the 
 | 1-9 or wheel: hotbar slot. **I** or **Tab**: inventory and the arm's matter compiler (LMB move or drag, RMB split, Shift quick move; click a recipe to queue it, Shift x5; click a queued job to cancel) | |
 | **B** blueprint mode: 1-9, 0 or wheel pick a building, LMB queue a ghost, R rotate, RMB cancel, X mark for deconstruction, T drag a terrain-clear rectangle. Robots build the queue; within 4 m the suit builds by hand | |
 | **C** combat mode (the laser, or a round 2 gun if a dev scenario gave you one: RMB aim, R reload) | |
+| **J** the ship AI: build queue (arrows reorder, x cancels), logistics with the reason for every route, stock targets (+, -, x, and a grid to add more). **M** out to the whole planet and back; **-** and **=** zoom out and in by hand | |
 | F headlamp, L story log, Esc close window, F1 dev menu (scenarios, save, export, import) | |
 
 ## What is simulated
+
+Round 4, the planet:
+
+- **Geometry.** The density and material field is stored in polar coordinates (`gen.js`, `planet.js`): x is arc
+  length along the datum circle, y is altitude above it; a sample is 0.125 m at the datum; chunk columns are counted
+  modulo the circumference, so x and x + 4,032 m are the same place and chunks are still generated on demand. The
+  planet is 4,032 m around (56 site slots of 72 m, 504 chunks of 8 m), radius 641.7 m: a playable scale, about
+  1 : 8,100 of the home moon the orbital act flies around (5,200 km), with the real g (8.7 m/s2) kept and shown. The generators
+  are noise along x, which does not close by itself: over the last 96 m before the seam (a quarter turn west of the
+  crash site) every field cross-fades into its own continuation, so there is no step (tested).
+- **Gravity** is -y in those coordinates, which is toward the centre everywhere, for the player, creatures, loose
+  matter, robots, particles and projectiles alike; plants stand along local up because the renderer puts every
+  sprite where it really is. `planet.toCart`, `gravity` and `up` give the Cartesian picture, and the tests check that
+  a body let go a quarter and a half of the way round falls at the centre.
+- **The camera** looks along local down. Every sprite is placed by the vertex shader at its true position in a frame
+  turned so that the camera's up is the screen's up (`uBend` in `render.js`); the terrain shader does the inverse per
+  pixel; the parallax layers are drawn flat into their target and read through the same map, so they bend with the
+  ground; the mouse is mapped back through it. Close up the ground is nearly flat (0.5 m of drop at the edge of the
+  screen); **-**, **=** and **M** zoom out without a cut: at 13 times the horizon is a curve, at 104 times the whole
+  disc is on screen and the camera has moved to the centre. Outside the 96 x 54 m density window the shader draws
+  the planet from a profile (ground height, biome, lushness and sites, one texel per 2 m): soil over basalt over
+  obsidian, the crust warming toward a dull core, the forest as a dark glowing band, hives and bases as their own
+  light, the air as a thin limb. The sky turns against the camera: the ringed giant stands over the crash site and
+  has set by the time you reach the far side. The HUD has a longitude strip and the planet with you on top of it.
+- **Two charts.** A periodic x needs a seam somewhere; it is kept away from the player. Chart 0 holds x in
+  [-1008, 3024), chart 1 holds [-3024, 1008); the half of the planet around the crash site has the same coordinates
+  in both, so home never moves. When the player comes within 400 m of the current seam everything on the far half
+  is re-expressed (x +- 4,032): player, camera, feet, creatures, robots, loose matter, machines, ghosts, the kit.
+- **Layout.** Ruins, hives, outposts and labs stand in the 56 slots round the circumference (the first hours' sites
+  are where round 3 had them); the hive's main base, deeper and with twice the chambers, is on the antipode.
+- **Launch.** The pad's longitude goes to the orbital act: the rocket stands where the pad really is on the moon.
+
+Round 4, the automation loop (`auto.js`, `supply.js`, `robots.js`):
+
+- **Place anything.** A frame costs nothing to place and needs no kit in your hands. Every frame is an order.
+- **The queue.** Orders are served by what helps the base expand (network and robots, then mining, smelting,
+  assembly, storage, belts, the rest), then in the order you placed them (`queueOrder`, pure, tested). The ship AI
+  window (J) lists the queue with a reason on every line (who is building it, who is making the kit and how long is
+  left, which raw material is short and by how much, no free robot, outside the network) and has arrows that move an
+  order up, down or to the front, and a cancel.
+- **Every means.** `planAll` (pure, tested) meets the queue's kits first and the stock targets second from what is
+  in stock; what is missing is ordered from the best producer that stands: the machine that specialises in the
+  recipe; else the wreck's fabricator, which works straight from the ship hold, three times slower; else the arm on
+  the suit, eight times slower. If the hold lacks the inputs and the suit holds them, the arm gets the job. Each
+  producer's inputs become demand in turn, down to raw matter; what nobody has is named as the bottleneck. What an
+  earlier order still waits for is kept for it: a cheaper, later order does not eat the iron first. Robots carry the
+  kit to the frame and build it; within reach, the suit builds by hand.
+- **Logistics.** Every steady flow (a machine's output to the machine that consumes it, else to the hold) is weighed
+  by `chooseRoute` (pure, tested): robots (trip time there and back at loaded speed, 60 kg a trip, the share of the
+  fleet the flow would take, watt-hours per kilogram) against a belt (cells to build, iron, 40 W a cell, whether the
+  line between is level and free, whether a hive is awake beside it, whether the grid has the power). When the belt
+  wins the AI queues the belt frames itself; they go through the same queue; a finished belt takes the flow and the
+  robots leave it alone. A belt that ends at the wreck's intake feeds the hold. The reason for every choice is on
+  the HUD and in the window; robot routes are drawn as moving marks.
+- **The ground hauler.** The wreck releases two drones and one six-legged hauler. It walks the surface it holds on
+  to (down into a cut, along a wall, under an overhang), carries 150 kg, fills its bed from pieces lying together,
+  and takes the loose matter no drone can drop a line on.
+- **Power.** Machines are on a budget: the wreck's auxiliary bus (4 kW) and the reactor (25 kW, less what the laser
+  takes) when it is in its bay, set down, or on your back within 26 m of the grid. The grid grows from the wreck
+  through every machine within reach; loads are served in the queue's priority (`powerBudget`); a starved machine
+  runs slower in proportion, a belt too, and a machine off the grid stops. Carry the reactor off to cut rock and the
+  base runs on 4 kW.
+- **Stock targets** are edited in the same window: plus, minus (shift x5), remove, and a grid of everything that can
+  be kept in stock as well.
 
 Round 3 (the slice):
 
@@ -171,8 +256,9 @@ From round 2, unchanged unless noted:
   reactor are), the ship hold, every loose body, stock targets, machines and their buffers, chests, blueprints,
   robots and their loads, kills, site state, hive alert, pollution, story beats seen, and the space state.
   `src/save.js` is the only module that touches storage, through an adapter `{ load(slot), save(slot, blob), list() }`
-  and a versioned schema: version 3, with a migration from round 2's version 2 (the laser drill item becomes the
-  kit on your back; tested).
+  and a versioned schema: version 4, with migrations from round 2's version 2 (the laser drill item becomes the
+  kit on your back; tested) and round 3's version 3 (a flat world maps onto the planet: x is still metres from the
+  crash site, edited chunks are folded onto the circle).
 - Death: until you build the bio-printer, dying restarts you at the crash site; once it exists you respawn there.
   Your body and inventory stay where you died, and so do the reactor and the laser: go and get them.
 - Space: a star, seven planets, the home moon around a ringed giant, a belt at 2.1 to 3.3 AU, all at real scale in
@@ -192,7 +278,9 @@ From round 2, unchanged unless noted:
 `src/core.js` (G, events, input, hashing), `src/render.js` (renderer, post, sprite batch and its shapes, render
 targets, particles), `src/items.js` (items, inventories, recipes, the arm), `src/icons.js`, `src/ui.js`,
 `src/save.js`, `src/story.js`, `src/audio.js`, `src/hud.js`, `src/test.js`.
-`src/surface/`: `gen.js` (pure generation), `world.js` (density field, brushes, queries), `terrain.js` (shader),
+`src/surface/`: `gen.js` (pure generation, the planet's size and seam), `planet.js` (charts, Cartesian maps, the
+camera's map), `auto.js` (the ship AI's planner: queue, demand, routes, power), `world.js` (density field, brushes,
+queries), `terrain.js` (shader),
 `light.js`, `heat.js` (the heat field), `flora-gen.js` (species, wind, the shared plant draw), `flora.js` (the play
 plane), `backdrop.js` (sky, seven layers behind, two in front, background animals), `life.js` (motes, moths,
 skitters), `player.js` (body and rig), `power.js` (pure: power budget, network reach, load), `kit.js` (laser,
@@ -200,7 +288,7 @@ reactor, turret, cables, the wreck), `matter.js` (loose bodies), `supply.js` (st
 `creatures.js` (species, `stance`, herds), `env.js` (noise, pollution), `hive.js`, `structures.js` with
 `ruins-gen.js`, `hive-gen.js`, `base-gen.js`, `sites.js`, `factory.js`, `blueprint.js`, `robots.js`.
 `src/space/*` (orbit, ship, belt, combat, view). `tools/check.mjs`, `tools/ui-flow.mjs`, `tools/shot.mjs`.
-Plan, decisions and lore notes: `PLAN.md`. Leif's round 3 asks: `docs/ROUND3.md`. Check result and proof shots:
+Plan, decisions and lore notes: `PLAN.md`. Leif's asks: `docs/ROUND4.md`, `docs/ROUND3.md`. Check result and proof shots:
 `docs/CHECK.md`, `docs/shots/`.
 
 ## Licence
@@ -209,22 +297,49 @@ Apache-2.0, see `LICENSE`. Dependencies: three (MIT), vite (MIT, build only), pu
 
 ## Cut or simplified (said plainly)
 
+Round 4:
+
+- **The simulation runs in the polar chart, not in Cartesian space.** Arc length is measured at the datum circle; a
+  metre along the ground at altitude h is really (R + h) / R metres, 8 % more at +50 m and 8 % less at -50 m. A round
+  brush is therefore slightly oval in true space, and horizontal speed scales the same way. The planet does not
+  rotate, so there are no Coriolis terms. The body's jet does not reach orbit: the launch is still the pad.
+- The planet is small (4 km around) and its interior is drawn, not simulated: below the generated crust the far
+  view shows a painted mantle and core. Zoomed out past about four times, ground outside the density window comes
+  from the profile: caves, cuts and buildings there are not shown; sprites fade out between 7 and 12 times, and
+  beyond that the HUD marks you, the wreck, outposts and the main hive.
+- The parallax layers are not periodic: after a full lap the trees behind the crash site are different trees (the
+  play plane, the groves and the sky are the same). The sky's turn is a 2D convention (a pivot under the horizon).
+- Things on the far half of the planet jump by one circumference in the chart when it switches; a creature or a
+  robot that is exactly on the seam at that moment may lose its target for a step. Pollution does not diffuse
+  across one fixed column. Sites far from the crash site are not where a round 3 save had them (the slots now close
+  round the planet and the main hive took the antipode); edits a round 3 save made out there stay in the rock.
+- Belts run level only, so the AI lays one only between two ends on the same row with free, supported cells
+  between; it does not grade terrain for a belt, and it does not take a belt up again when a flow dies.
+- The route model uses nominal rates (a furnace's smelting rate, an assembler's batch mass per batch time), not a
+  measured throughput; danger is one test (an awake hive within 70 m of the line).
+- The power grid is reach-based (26 m from node to node), not cabled; the wreck's fabricator is not on it.
+- The ground hauler follows the surface greedily and tries the other way round when it makes no way; it has no path
+  search, does not build, and can be beaten by a maze. Drones still fly over.
+- Mining raw ore is still yours (the laser) or a miner's: the AI names the shortage, it does not go and cut rock.
+- The launch carries the pad's longitude into the orbital act; the view still switches at ignition.
+- Frame times are software GL; the terrain shader now evaluates the sky per pixel at full resolution.
+
+Round 3 and before:
+
 - Round 3 is the slice and the core mechanics that needed no design decision. **Not built**: the engine rewrite
   (ECS / systems scheduling), a rigid-body engine with constraints, ragdolls, gore and fluid splatting, radar and
   fog of war, more weapons, the mech suit, the loadout body view, and everything that waits for the design document
   (the advanced species, Earth, the campaign clock, endings, balloon and interstellar logistics).
-- The robots are still the flying drones of round 2 with a net under them; there is no ground hauler. They winch a
-  chunk up from wherever they can see it, and skip what lies under an overhang. Their route finding is "go over it".
-- Only the laser and suit charging are on the power budget; machines still run without power. The network is range
+- The drones winch a chunk up from wherever they can see it; what lies under an overhang is the ground hauler's.
+- The network is range
   with rock halving it, not a traced line of sight; the turret's only controller is the ship AI.
-- Stock targets are shown in the HUD and saved, but there is no window to edit them yet.
 - Heat acts on terrain, plants, the body and loose rock; not yet on machines or animals (those burn in the beam only).
 - The background animals, moths, skitters and motes are not simulated creatures: they cannot be hurt, and are not
   saved. Creatures in the play plane are not saved either (as in round 2).
 - The backdrop is half resolution by design (soft distance). Frame times in `docs/CHECK.md` are software rendering;
   the slice has not been measured on a GPU.
 - Loose bodies are circles, not rigid polygons; heaps are merged bodies drawn as several rocks.
-- Surface: no water, no weather beyond fog, no day cycle (always night), no world wrap, no power grid or inserters
+- Surface: no water, no weather beyond fog, no day cycle (always night), no inserters
   (belts feed machines directly), one generic rocket part, no food or water, no gamepad. Machines stand on a 0.5 m
   placement grid and do not block the player. Rock the miner removes is tailings and is not kept.
 - Combat mode: the ship laser is the weapon. The round 2 rifle and shotgun exist only in dev scenarios. Dead turrets

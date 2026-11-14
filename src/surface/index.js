@@ -11,9 +11,10 @@ import { save } from '../save.js';
 import { ui } from '../ui.js';
 import { STORY } from '../story.js';
 import { world, TS, GRAV, M, surfaceH } from './world.js';
-import { biome } from './gen.js';
+import { biome, homeDist, CIRC, RAD } from './gen.js';
+import { planet } from './planet.js';
 import { light, initLight, computeLight, LW, LH } from './light.js';
-import { initTerrain, updateTerrain, stepHeat, view } from './terrain.js';
+import { initTerrain, updateTerrain, stepHeat, view, profileTex } from './terrain.js';
 import { S, C, mul } from './state.js';
 import { env } from './env.js';
 import { P, SUIT, WEAPON, spawnAt, stepPlayer, stepBullets, drawPlayer, hurt } from './player.js';
@@ -32,11 +33,30 @@ import { K, SHIP, kitReset, kitUse, kitHint, stepKit, drawKit, drawKitBeam, draw
 import { mobility, REACTOR_W, LASER_W, SUIT_BUS_W, CABLE, SHIP_LINK } from './power.js';
 import { SUP, stepSupply, dumpSupply, loadSupply } from './supply.js';
 import { stepLife, drawLife } from './life.js';
+import { AUTO, PORT, queueView, drawAuto, dumpAuto, loadAuto } from './auto.js';
 
-let near = null, auto = null, horizon = 0, thudT = 0;
+let near = null, auto = null, horizon = 0, thudT = 0, shiftT = 0;
+const ZMAX = 104, sstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); }, scr = [0, 0];
+// where a world point is on the screen, through the camera that looks along local down
+const toScr = (x, y) => planet.toScreen(S.cam, S.ppm, G.w, G.h, x, y, scr);
+S.toScr = toScr;
+// the planet's chart moved: everything this act holds a position for is re-expressed in it (planet.js)
+planet.onShift((fx, fg) => {
+  const d = fx(P.x) - P.x;
+  if (d) { P.x += d; S.cam.x += d; S.mouse.x += d; for (const f of P.rig.f) for (const k of ['x', 'tx', 'sx', 'px']) if (typeof f[k] === 'number') f[k] += d; for (const p of S.parts.list) p.x = fx(p.x); for (const l of S.lights) l.x = fg(l.x); for (const b of S.bullets) b.x = fx(b.x); heat.clear(); resetFlora(); if (S.corpse && typeof S.corpse.x === 'number') S.corpse.x = fx(S.corpse.x); }
+  for (const c of creatures) { const e = fx(c.x) - c.x; if (!e) continue; c.x += e; for (const n of c.nodes) n.x += e; for (const l of c.legs || []) { l.fx += e; if (l.t >= 0) { l.sx += e; l.tx += e; } } if (c.goal) c.goal.x = fx(c.goal.x); if (c.home) c.home.x = fx(c.home.x); }
+  for (const r of robots) { const e = fx(r.x) - r.x; r.x += e; if (e && r.path) r.path = null; }
+  for (const c of matter.list) c.x = fx(c.x);
+  for (const q of [K.reactor, K.laser]) if (q.state === 'ground' || q.state === 'turret') q.x = fx(q.x); for (const n of K.cable.concat(K.cable2)) { const e = fx(n.x) - n.x; n.x += e; n.px += e; }
+  let moved = false; for (const m of F.machines) { const g = fg(m.x); if (g !== m.x) { m.x = g; moved = true; } } for (const it of F.items) it.x = fg(it.x);
+  if (moved) { F.cells.clear(); for (const m of F.machines) for (let i = 0; i < m.w; i++) for (let j = 0; j < m.h; j++) F.cells.set((m.x + i + 32768) * 65536 + (m.y + j + 32768), m); }
+  for (const g of BP.ghosts) g.x = fg(g.x); for (const c of BP.clears) { const e = fx(c.x0) - c.x0; c.x0 += e; c.x1 += e; }
+  for (const e of env.events) e.x = fx(e.x);
+});
 const BIOME = ['fungal forest', 'violet thicket', 'acid marsh'], DIR = { t: 0, pred: 0 };
 flora.drop = (id, n, x, y) => matter.spawn(id, n, x, y, rand(-0.8, 0.8), rand(0.5, 2));
 S.shakeBy = v => { G.shake += v; };
+F.sink = (cx, y, id, n) => S.crash && cx === PORT.x && y === PORT.y ? inv.add(K.hold, id, n) : null;      // a belt that ends at the wreck's intake feeds the ship hold
 S.loose = (id, n, x, y) => matter.spawn(id, n, x, y, rand(-1, 1), rand(1, 3));       // what a kill or a broken thing leaves lies in the world
 S.thud = (c, v) => { if (thudT > 0 || Math.abs(c.x - P.x) > 16) return; thudT = 0.09; audio.play(c.kg > 20 ? 'thud' : 'tink'); env.noise(c.x, c.y, 6 + Math.min(14, c.kg * 0.3)); };
 events.on('built', kind => { if (kind === 'antenna' && S.crash) wakeShipRobots(); });
@@ -57,7 +77,8 @@ function objective() {
   if (K.reactor.state === 'ship') return 'the laser needs the reactor: pull it out of its bay';
   if (S.stats.dug < 120) return 'cut into the outcrop east of the wreck (lmb)';
   if (!has('antenna')) return 'the antenna frame stands by the wreck: stay near it and the suit builds it';
-  if (!has('furnace')) return S.printer.q.some(j => j.r === 'furnace') ? 'the arm is printing the furnace, atom by atom' : S.count('furnace') ? 'place the furnace (b)' : S.count('basalt') >= 40 ? 'print a furnace on the arm (i)' : 'gather 40 kg of basalt by hand (v) for a furnace';
+  if (!has('furnace')) return BP.ghosts.some(g => g.kind === 'furnace') ? 'the ship ai has the furnace in its queue (j shows why it waits)' : 'place a furnace frame anywhere (b): the ship ai has the kit made, carried and built';
+  if (!has('miner') && !BP.ghosts.some(g => g.kind === 'miner')) return 'place a miner frame on the ore (b): the ai lays the belt or sends the robots itself';
   if ((SUP.stock && SUP.stock.iron || 0) < SUP.targets.iron) return 'the ship ai runs it now: robots carry ore in and iron out';
   return 'the line runs without hands';
 }
@@ -68,8 +89,8 @@ export const surface = {
     save.register('surface', { dump: dumpSurface, load: loadSurface });
   },
   start(scenario) {
-    input.mx = G.w / 2 + 260; input.my = G.h / 2 + 46; S.crash = true; S.slice = false; kitReset('carried'); DIR.t = 0; DIR.pred = 0;
-    if (scenario === 'factory') { S.calm = 150; S.crash = false; hive.quiet = true; flora.clear = [-14, 10]; baseKit(); buildScenario(); spawnAt(-6); S.add('part', 6); S.add('biomass', 12); spawnCreature('grazer', 9, 1.2); }
+    planet.reset(); loadAuto(null); K.fab = null; S.zo = S.zoT = 1; input.mx = G.w / 2 + 260; input.my = G.h / 2 + 46; S.crash = true; S.slice = false; kitReset('carried'); DIR.t = 0; DIR.pred = 0;
+    if (scenario === 'factory') { S.calm = 150; S.crash = false; hive.quiet = true; flora.clear = [-14, 10]; baseKit(); buildScenario(); spawnAt(-6); K.reactor.state = 'ground'; K.reactor.x = -8; K.reactor.y = 0.4; S.add('part', 6); S.add('biomass', 12); spawnCreature('grazer', 9, 1.2); }
     else if (scenario === 'blueprint') {     // a hub, three drones, a chest of kits, and a queue for them
       S.crash = false; hive.quiet = true; flora.clear = [-18, 18]; baseKit(); flatten(-16, 16); spawnAt(3); const hub = place('hub', -1, 0, 1, true), ch = place('chest', -6, 0, 1, true);
       for (const [k, n] of [['furnace', 1], ['assembler', 1], ['miner', 1], ['belt', 12], ['iron', 150], ['chest', 1]]) inv.add(ch.inv, k, n);
@@ -81,7 +102,7 @@ export const surface = {
     } else if (scenario === 'combat') {      // the hive's answer: an attack wave, and the round 2 guns to meet it (a dev scenario)
       spawnAt(0); S.mode = 'combat'; hive.quiet = true; baseKit(); guns(); S.add('rifle rounds', 300); K.laser.state = 'ship'; K.reactor.state = 'ship';
       for (const [t, x, y] of [['scout', 9, 1.2], ['scout', 13, 1.2], ['swarmer', 7, 1], ['swarmer', 8, 1], ['swarmer', 11, 1], ['swarmer', -8, 1], ['brute', 16, 2], ['spitter', -11, 1.2], ['flier', 6, 6], ['flier', -5, 7]]) { const c = spawnCreature(t, x, y, { x: 0, y: 1 }); c.state = 'charge'; c.order = 'attack'; }
-      auto = dt => { let b = null, bd = 1e9; for (const c of creatures) { const d = Math.hypot(c.x - P.x, c.y - P.y); if (d < bd && c.agg) { bd = d; b = c; } } if (b) { input.mx = G.w / 2 + (b.x - S.cam.x) * S.ppm; input.my = G.h / 2 - (b.y - S.cam.y) * S.ppm; } input.down[0] = !!b && G.auto; input.down[2] = G.auto; if (G.auto) { P.hp = Math.max(P.hp, 55); S.flash = Math.min(S.flash, 0.3); } };
+      auto = dt => { let b = null, bd = 1e9; for (const c of creatures) { const d = Math.hypot(c.x - P.x, c.y - P.y); if (d < bd && c.agg) { bd = d; b = c; } } if (b) { toScr(b.x, b.y); input.mx = scr[0]; input.my = scr[1]; } input.down[0] = !!b && G.auto; input.down[2] = G.auto; if (G.auto) { P.hp = Math.max(P.hp, 55); S.flash = Math.min(S.flash, 0.3); } };
     } else if (scenario === 'oldkit') { spawnAt(0); hive.quiet = true; baseKit(); guns(); K.laser.state = 'ship'; K.reactor.state = 'ship'; S.crash = true; }   // the round 2 kit, for the interface test
     else if (scenario === 'drill') {         // the ship laser at work on a hillside, the reactor on the back
       spawnAt(-22); hive.quiet = true; auto = () => { input.mx = G.w / 2 + 250 + Math.sin(G.time * 0.9) * 40; input.my = G.h / 2 + 150 + Math.sin(G.time * 1.3) * 50; input.down[0] = G.auto || input.down[0]; };
@@ -97,13 +118,38 @@ export const surface = {
     } else if (scenario === 'predator') {    // bigger than you, and it eats things your size
       spawnAt(44); hive.quiet = true; const g = world.groundY(59, surfaceH(59) + 6, 0, 20) || 0, c = spawnCreature('stalker', 59, g + 1); c.dir = -1; c.state = 'stalk'; input.mx = G.w / 2 + 330; input.my = G.h / 2 + 10;
       auto = () => { if (G.auto) { P.hp = Math.max(P.hp, 60); S.flash = Math.min(S.flash, 0.2); } };
-    } else if (scenario === 'supply') {      // demand and supply: a furnace, the arm, loose ore, and the ship's robots carrying between them
+    } else if (scenario === 'supply' || scenario === 'targets') {      // demand and supply: a furnace, the arm, loose ore, and the ship's robots carrying between them
       S.slice = true; sliceGround(); spawnAt(4); antennaUp(); wakeShipRobots(); place('furnace', -2, 0, 1, true); give([['iron', 6], ['copper', 6]], K.hold); give([['basalt', 44], ['iron ore', 8], ['o2 cell', 1], ['power cell', 1]]);
-      for (let i = 0; i < 9; i++) matter.spawn('iron ore', 6 + (i % 3) * 3, 8 + i * 0.5, 0.6 + (i % 2) * 0.3); for (let i = 0; i < 6; i++) matter.spawn('basalt', 9 + i, 7.5 + i * 0.7, 1.2); S.stats.dug = 400; hive.quiet = true; input.mx = G.w / 2 + 160; input.my = G.h / 2 + 60;
+      for (let i = 0; i < 9; i++) matter.spawn('iron ore', 6 + (i % 3) * 3, 8 + i * 0.5, 0.6 + (i % 2) * 0.3); for (let i = 0; i < 6; i++) matter.spawn('basalt', 9 + i, 7.5 + i * 0.7, 1.2); S.stats.dug = 400; hive.quiet = true; input.mx = G.w / 2 + 160; input.my = G.h / 2 + 60; if (scenario === 'targets') ui.toggleAI(true);       // 'targets': the same, with the stock-target editor open
     } else if (scenario === 'ruins') { const st = slotStruct(-2); spawnAt(st.mouth[0] - 3); hive.quiet = true; baseKit(); }
     else if (scenario === 'base') { const st = slotStruct(2); spawnAt(st.door[0] + (st.door[0] < st.x ? -4 : 4)); hive.quiet = true; baseKit(); }
     else if (scenario === 'hive') { const st = slotStruct(1); spawnAt(st.mouth[0] - 7); hive.alert[st.id] = 30; hive.timer[st.id] = 3; baseKit(); guns(); S.add('rifle rounds', 200); S.mode = 'combat'; input.mx = G.w / 2 + 300; }
     else if (scenario === 'inventory') { spawnAt(0); hive.quiet = true; baseKit(); SUP.on = false; for (const [k, n] of [['iron ore', 46.3], ['copper ore', 18.75], ['lumen', 3.2], ['biomass', 22.4], ['fibre', 6.1], ['resin', 2.5], ['chitin', 4], ['ichor', 1.2], ['furnace', 1], ['belt', 8], ['drone', 2], ['part', 3], ['xeno shard', 5.5]]) S.add(k, n); S.printer.q.push({ r: 'miner', left: 30, total: 48 }, { r: 'belt', left: 16, total: 16 }); ui.toggle(true); }
+    else if (scenario === 'autobuild' || scenario === 'queue') {
+      // place and it gets built: four frames set down with no kit anywhere. The ship AI orders the kits, the arm prints
+      // them from what the robots bring it, the robots build in the queue's order. 'queue' opens the AI window on it.
+      S.slice = true; sliceGround(); spawnAt(1); antennaUp(-4); wakeShipRobots(); hive.quiet = true; S.stats.dug = 400; give([['basalt', 70], ['iron', 46], ['copper', 14], ['iron ore', 30]], K.hold); give([['o2 cell', 1], ['power cell', 1]]);
+      for (let i = 0; i < 7; i++) matter.spawn('iron ore', 7 + (i % 3) * 3, 8.2 + i * 0.5, 0.7 + (i % 2) * 0.3);
+      addGhost('assembler', 9, 0); addGhost('chest', 14, 0); addGhost('furnace', 5, 0); addGhost('hub', -8, 0); for (let j = 0; j < 3; j++) addGhost('wall', 18, j);
+      input.mx = G.w / 2 + 220; input.my = G.h / 2 + 40; if (scenario === 'queue') ui.toggleAI(true);
+    } else if (scenario === 'conveyor') {    // a furnace and an assembler five metres apart on level ground: the AI lays the belt. A second furnace far off across the wreck: robots.
+      S.slice = true; spawnAt(10.6); antennaUp(-3); wakeShipRobots(); hive.quiet = true; S.stats.dug = 400; give([['belt', 8], ['iron', 30], ['copper', 6]], K.hold); give([['o2 cell', 1], ['power cell', 1]]);
+      const f1 = place('furnace', 2, 0, 1, true), as = place('assembler', 14, 0, 1, true), f2 = place('furnace', -44, Math.round(surfaceH(-21.5) / TS), 1, true); f1.inp['iron ore'] = 70; f2.inp['iron ore'] = 30; as.recipe = 'part'; SUP.targets = { iron: 20, part: 6 };
+      input.mx = G.w / 2 - 260; input.my = G.h / 2 + 30;
+    } else if (scenario === 'overhang') {    // ore under a ledge: no drone can drop a line on it. The ground hauler walks in.
+      S.slice = true; spawnAt(-0.5); antennaUp(-5); wakeShipRobots(); hive.quiet = true; S.stats.dug = 400; give([['o2 cell', 1], ['power cell', 1]]);
+      world.shape(2.6, 1.2, 8.2, 2.5, (x, y) => Math.max(Math.abs(x - 5.4) - 2.6, Math.abs(y - 1.85 - Math.sin(x * 1.7) * 0.12) - 0.42) + Math.sin(x * 3.1 + y * 2) * 0.06, 1, M.BASALT); world.shape(7, -0.2, 8.6, 2, (x, y) => Math.max(Math.abs(x - 7.8) - 0.5 - (1.4 - y) * 0.12, y - 1.9), 1, M.BASALT);
+      for (let i = 0; i < 5; i++) matter.spawn('iron ore', 9 + i * 2, 3.6 + i * 0.7, 0.45); matter.spawn('iron ore', 12, 10.5, 0.5); input.mx = G.w / 2 + 240; input.my = G.h / 2 + 60;
+    }
+    else if (scenario === 'planet') { spawnAt(-4.5); hive.quiet = true; baseKit(); S.zo = S.zoT = ZMAX; }                 // the whole planet: the disc, the limb, the molten core
+    else if (scenario === 'horizon') { spawnAt(60); hive.quiet = true; baseKit(); S.zo = S.zoT = 13; }                     // far enough out that the ground is a curve
+    else if (scenario === 'far90') {         // a quarter of the way round and walking on: the camera has turned with the ground
+      spawnAt(CIRC * 0.262); hive.quiet = true; baseKit(); auto = () => { input.mx = G.w / 2 + 300; input.my = G.h / 2 + 20; if (G.auto) input.keys.add('d'); };
+    } else if (scenario === 'seam') {        // walking west across the place where the two charts meet
+      spawnAt(-CIRC / 4 + 407); hive.quiet = true; baseKit(); auto = () => { input.mx = G.w / 2 - 300; input.my = G.h / 2 + 20; if (G.auto) input.keys.add('a'); };
+    } else if (scenario === 'antipode') {    // the far side: the hive's main base, under a sky the giant never rises in
+      const st = structsIn(CIRC / 2 - 5, CIRC / 2 + 5).find(q => q.main); spawnAt(st.mouth[0] - 9); baseKit(); hive.alert[st.id] = 20; hive.timer[st.id] = 40; input.mx = G.w / 2 + 300; input.my = G.h / 2 + 30;
+    }
     else {
       // the slice, and the default start: awake beside the wreck with nothing in your hands. The weapon is on the ship,
       // the reactor is in it, the antenna is a frame waiting to be built, the forest is watching.
@@ -117,18 +163,23 @@ export const surface = {
           else { input.mx = G.w / 2 + 300 + Math.sin(t * 0.8) * 60; input.my = G.h / 2 + 30 + Math.sin(t * 1.1) * 70; input.down[0] = true; } };
       }
     }
-    S.cam.x = P.x; S.cam.y = P.y + 2.2; horizon = surfaceH(P.x); P.wa = P.aim = 0; events.emit('landed');
+    P.x = planet.update(P.x, true); S.cam.x = P.x; S.cam.y = P.y + 2.2; horizon = surfaceH(P.x); P.wa = P.aim = 0; events.emit('landed');
   },
   enter(d) { if (d && d.died) { P.hp = 0; P.dead = 0.01; events.emit('died'); } },
   step(dt) {
     light.emitters.length = 0; S.frameN = (S.frameN || 0) + 1; thudT -= dt;
-    S.zoom = lerp(S.zoom, 1 + 0.32 * P.ads, Math.min(1, dt * 8)); S.ppm = G.h / 15 * S.zoom; S.mouse.x = S.cam.x + (input.mx - G.w / 2) / S.ppm; S.mouse.y = S.cam.y - (input.my - G.h / 2) / S.ppm;
+    S.zoom = lerp(S.zoom, 1 + 0.32 * P.ads, Math.min(1, dt * 8)); // zoom: - and = step out and in, m goes to the whole planet and back; the view is continuous from the body to the disc
+    if (!ui.open) { if (input.hit('m')) S.zoT = S.zoT > 1.5 ? 1 : ZMAX; if (input.key('-')) S.zoT = Math.min(ZMAX, S.zoT * (1 + dt * 1.8)); if (input.key('=')) S.zoT = Math.max(1, S.zoT / (1 + dt * 1.8)); }
+    S.zo = Math.exp(lerp(Math.log(S.zo), Math.log(S.zoT), Math.min(1, dt * 3.2))); if (Math.abs(S.zo - S.zoT) < 0.002) S.zo = S.zoT; S.far = sstep(3, 6, S.zo); S.lod = sstep(6, 11, S.zo);
+    S.ppm = G.h / 15 * S.zoom / S.zo; planet.fromScreen(S.cam, S.ppm, G.w, G.h, input.mx, input.my, scr); S.mouse.x = scr[0]; S.mouse.y = scr[1];
+    shiftT -= dt; { const f = shiftT <= 0; if (f) shiftT = 2; planet.update(P.x, f); }
     if (auto) auto(dt);
     if (input.hit('i') || input.hit('Tab')) ui.toggle();
+    if (input.hit('j')) ui.toggleAI();
     if (input.hit('Escape') && ui.open) ui.toggle(false);
     if (input.hit('e') && !P.dead) {
       if (ui.open) ui.toggle(false);
-      else if (!kitUse() && !siteUse()) { const m = nearest(); if (m && m.kind === 'pad' && m.n >= ROCKET_PARTS) { m.n = 0; G.switchAct('space', { launch: true }); } else if (m && m.kind !== 'antenna') ui.openMachine(m); }
+      else if (!kitUse() && !siteUse()) { const m = nearest(); if (m && m.kind === 'pad' && m.n >= ROCKET_PARTS) { m.n = 0; G.switchAct('space', { launch: true, lon: planet.lon((m.x + m.w / 2) * TS) * Math.PI / 180 }); } else if (m && m.kind !== 'antenna') ui.openMachine(m); }
     }
     env.step(dt); stepPlayer(dt); stepKit(dt); stepBlueprint(dt); stepRobots(dt); stepSupply(dt); stepBullets(dt); stepCreatures(dt); stepFactory(dt); stepSites(dt); stepHive(dt); stepFlora(dt); stepHeat(dt); matter.step(dt); matterHeat(dt); stepLife(dt);
     const B = K.laser.beam; if (B && B.hit) siteDamage(B.x2, B.y2, 150 * dt);
@@ -137,21 +188,24 @@ export const surface = {
     if (S.scare > 0) { backdrop.scare = Math.max(backdrop.scare, S.scare); S.scare = Math.max(0, S.scare - dt * 0.8); }
     if (S.crash && !K.awake && F.machines.some(m => m.kind === 'antenna')) wakeShipRobots();
     if (S.slice) { DIR.t += dt;       // the one scripted thing in the slice: somewhere out there, something bigger than you notices
-      if (!DIR.pred && K.reactor.state !== 'ship' && (Math.abs(P.x) > 36 || DIR.t > 330)) { DIR.pred = 1; const x = P.x + (P.x >= 0 ? 1 : -1) * 30, g = world.groundY(x, surfaceH(x) + 6, 0, 20); if (g !== null) spawnCreature('stalker', x, g + 1); } }
-    const k = Math.min(1, dt * 5), look = 0.22 + 0.25 * P.ads; S.cam.x = lerp(S.cam.x, P.x + (input.mx - G.w / 2) / S.ppm * look, k); S.cam.y = lerp(S.cam.y, P.y + 1.6 + (G.h / 2 - input.my) / S.ppm * look, k);
+      if (!DIR.pred && K.reactor.state !== 'ship' && (homeDist(P.x) > 36 || DIR.t > 330)) { DIR.pred = 1; const x = P.x + (P.x >= 0 ? 1 : -1) * 30, g = world.groundY(x, surfaceH(x) + 6, 0, 20); if (g !== null) spawnCreature('stalker', x, g + 1); } }
+    // the camera follows the body and looks along its down; far out it settles on the planet's centre
+    const k = Math.min(1, dt * 5), look = (0.22 + 0.25 * P.ads) / (S.zo * S.zo), zt = sstep(Math.log(16), Math.log(80), Math.log(S.zo));
+    S.cam.x = lerp(S.cam.x, P.x + (input.mx - G.w / 2) / S.ppm * look, k); S.cam.y = lerp(S.cam.y, lerp(P.y + 1.6 + (G.h / 2 - input.my) / S.ppm * look, -RAD, zt), zt > 0 ? 1 : k);
     near = ui.open ? null : sites.near ? null : nearest();
     G.shake = Math.max(0, G.shake - dt * (0.6 + G.shake * 6));
   },
   draw(time) {
     const b = S.batch, sh = G.shake * 0.5, cx = S.cam.x + (Math.random() - 0.5) * sh, cy = S.cam.y + (Math.random() - 0.5) * sh, ppm = S.ppm;
-    b.begin(cx, cy, ppm); b.u.uTime.value = time;
+    b.begin(cx, cy, ppm); b.u.uTime.value = time; b.u.uBend.value.set(RAD * ppm, cy * ppm); b.u.uFade.value = 1 - sstep(7, 12, S.zo);
+    for (const f of backdrop.fore) { f.u.uBend.value.set(RAD * ppm, cy * ppm); f.u.uFade.value = 1 - sstep(1.6, 3, S.zo); }
     flora.pushers.length = 0; if (!P.dead) flora.pushers.push({ x: P.x, y: P.y, vx: P.vx, r: 0.35, h: 1.7 }); for (const c of creatures) if (c.nodes.length && !KIND[c.type].fly) flora.pushers.push({ x: c.x, y: c.y - 1.2, vx: c.vx, r: 0.3 + KIND[c.type].thick * 0.5, h: 1.6 });
     // shafts of planet-light in the play plane
-    for (let c = Math.floor((cx - 22) / 19); c <= Math.floor((cx + 22) / 19); c++) { const r = hash(c, 7, 230); if (r > 0.55) continue; const x = (c + 0.5 + (hash(c, 7, 231) - 0.5) * 0.8) * 19, top = Math.max(horizon, cy - 4) + 12, len = 13 + r * 8, a = -1.92 + (r - 0.3) * 0.12, br = 0.5 + 0.5 * Math.sin(time * 0.13 + r * 40), f = backdrop.fog;
+    for (let c = Math.floor((cx - 22 * Math.min(S.zo, 3)) / 19); c <= Math.floor((cx + 22 * Math.min(S.zo, 3)) / 19); c++) { const r = hash(c, 7, 230); if (r > 0.55) continue; const x = (c + 0.5 + (hash(c, 7, 231) - 0.5) * 0.8) * 19, top = Math.max(horizon, cy - 4) + 12, len = 13 + r * 8, a = -1.92 + (r - 0.3) * 0.12, br = 0.5 + 0.5 * Math.sin(time * 0.13 + r * 40), f = backdrop.fog;
       b.add(x + Math.cos(a) * len * 0.5, top + Math.sin(a) * len * 0.5, len, 1.2 + hash(c, 7, 232) * 2.2, a, [(0.02 + f[0]) * 1.2, (0.03 + f[1]) * 1.2, (0.034 + f[2]) * 1.2], 0.5 + 0.5 * br, 10, 2, c * 3.3); }
     drawFlora(b, time, false); drawSites(b, time);
     if (S.crash) drawWreck(b, time);
-    drawFactory(b, time); drawBlueprint(b, time); matter.draw(b, time); drawCreatures(b, time); drawKit(b, time); drawPlayer(b, time); drawRobots(b, time); drawLife(b, time); S.parts.draw(b, 1.2); drawKitBeam(b, time); drawFlora(b, time, true);
+    drawFactory(b, time); drawBlueprint(b, time); drawAuto(b, time); matter.draw(b, time); drawCreatures(b, time); drawKit(b, time); drawPlayer(b, time); drawRobots(b, time); drawLife(b, time); S.parts.draw(b, 1.2); drawKitBeam(b, time); drawFlora(b, time, true);
     for (const l of S.lights) light.emit(l.x, l.y, l.c[0], l.c[1], l.c[2]);
     b.end();
     horizon = lerp(horizon, surfaceH(cx), 0.05); backdrop.glare = Math.max(backdrop.glare, S.glare || 0);
@@ -178,7 +232,7 @@ export const surface = {
     txt(c, 'signature', w - 28, 78, { align: 'right', a: 0.35 });
     txt(c, `noise ${nz.toFixed(0)} m`, w - 28, ry, { align: 'right', col: nz > 50 ? RED : nz > 25 ? AMBER : INK, a: 0.7 }); line(c, w - 180, ry + 5, w - 28, ry + 5, 0.15); line(c, w - 28 - Math.min(152, nz * 1.6), ry + 5, w - 28, ry + 5, 0.8, nz > 50 ? RED : AMBER); ry += 20;
     txt(c, `pollution ${pol.toFixed(1)} ug/m3`, w - 28, ry, { align: 'right', col: pol > 60 ? RED : pol > 20 ? AMBER : INK, a: 0.7 }); line(c, w - 180, ry + 5, w - 28, ry + 5, 0.15); line(c, w - 28 - Math.min(152, pol * 1.5), ry + 5, w - 28, ry + 5, 0.8, pol > 60 ? RED : AMBER); ry += 20;
-    if (hn) { txt(c, `hive ${hn.d.toFixed(0)} m ${hn.x < P.x ? 'west' : 'east'}   ${hn.a < 6 ? 'asleep' : hn.a < 24 ? 'stirring' : 'awake'} ${hn.a.toFixed(0)}%`, w - 28, ry, { align: 'right', col: hn.a > 50 ? RED : hn.a > 6 ? AMBER : INK, a: 0.7 }); ry += 15; }
+    if (hn) { txt(c, `hive ${hn.d.toFixed(0)} m ${planet.dx(P.x, hn.x) < 0 ? 'west' : 'east'}   ${hn.a < 6 ? 'asleep' : hn.a < 24 ? 'stirring' : 'awake'} ${hn.a.toFixed(0)}%`, w - 28, ry, { align: 'right', col: hn.a > 50 ? RED : hn.a > 6 ? AMBER : INK, a: 0.7 }); ry += 15; }
     txt(c, `hivemind spread ${(hive.spread * 100).toFixed(1)}%   hunting you ${creatures.filter(q => q.agg).length}   wary ${creatures.filter(q => !q.agg).length}`, w - 28, ry, { align: 'right', a: 0.4 }); ry += 24;
     // power and network: every watt and every link is a counted thing
     { const used = K.pw.used || 0, lf = L.frac, rs = RX.state, [rx, ry2] = reactorPos(), rd = Math.hypot(rx - P.x, ry2 - P.y - 1);
@@ -193,24 +247,40 @@ export const surface = {
     if (SUP.on && SUP.stock) { txt(c, 'ship ai: stock targets', w - 28, ry, { align: 'right', a: 0.35 }); ry += 16;
       for (const k in SUP.targets) { const have = SUP.stock[k] || 0, tg = SUP.targets[k], o = SUP.orders.find(q => q.item === k), u = ITEMS[k].u === 'ea' ? '' : ' kg';
         drawIcon(c, k, w - 46, ry - 12, 18); txt(c, `${k} ${ITEMS[k].u === 'ea' ? Math.round(have) : have.toFixed(1)} / ${tg}${u}`, w - 52, ry, { align: 'right', col: have >= tg - 1e-6 ? INK : AMBER, a: 0.7 }); line(c, w - 180, ry + 5, w - 52, ry + 5, 0.15); line(c, w - 52 - 128 * Math.min(1, have / tg), ry + 5, w - 52, ry + 5, 0.7, have >= tg - 1e-6 ? INK : AMBER); ry += 15;
-        if (o) { txt(c, `> ${o.producer === 'suit' ? 'arm (matter compiler)' : o.producer}: ${o.note || ''}`, w - 52, ry, { align: 'right', a: 0.45 }); ry += 15; } ry += 3; }
+        if (o) { txt(c, `> ${o.note || ''}`, w - 52, ry, { align: 'right', a: 0.45 }); ry += 15; } ry += 3; }
       ry += 6; }
-    if (robots.length) { txt(c, `robots ${robots.length}   build queue ${BP.ghosts.length + BP.clears.length}   loose ${matter.total().toFixed(0)} kg`, w - 28, ry, { align: 'right', a: 0.6 }); ry += 15; for (const r of robots.slice(0, 6)) { const j = r.job, kg = inv.mass(r.cargo); txt(c, `robot ${r.id}  ${j && j.kind === 'carry' ? (r.state === 'cfetch' ? 'to ' : 'carrying ') + j.item + ' > ' + (j.dst.t === 'mach' ? j.dst.m.kind : j.dst.t === 'inv' ? 'hold' : j.dst.t === 'dump' ? 'spoil heap' : 'you') : r.state}${kg > 0.05 ? '  ' + kg.toFixed(0) + ' kg' : ''}  ${(r.wh / ROBOT.wh * 100).toFixed(0)}%`, w - 28, ry, { align: 'right', a: 0.4 }); ry += 13; } ry += 8; }
+    // the queue, the grid and the flows: what the ship AI is doing about what you placed, and why (j opens the window)
+    { const qv = queueView(robots), pw = AUTO.power;
+      if (qv.length) { txt(c, `build queue ${qv.length}   j: reorder`, w - 28, ry, { align: 'right', a: 0.35 }); ry += 15; for (const q of qv.slice(0, 4)) { txt(c, `${q.n} ${q.kind}${q.auto ? ' (ai)' : ''}: ${q.why.length > 62 ? q.why.slice(0, 60) + '..' : q.why}`, w - 28, ry, { align: 'right', col: /waits for|outside/.test(q.why) ? AMBER : INK, a: 0.6 }); ry += 13; } if (qv.length > 4) { txt(c, `+ ${qv.length - 4} more`, w - 28, ry, { align: 'right', a: 0.35 }); ry += 13; } ry += 6; }
+      if (F.machines.length > 1 || pw.demand > 100) { txt(c, `base grid ${(pw.used / 1000).toFixed(1)} / ${(pw.supply / 1000).toFixed(1)} kw   ${pw.note}`, w - 28, ry, { align: 'right', col: pw.demand > pw.supply + 1 ? AMBER : INK, a: 0.6 }); ry += 15; }
+      for (const r of AUTO.routes.slice(0, 3)) { txt(c, `${r.src.kind} > ${r.dst ? r.dst.kind : 'hold'}  ${r.item} ${r.rate.toFixed(2)} kg/s  ${r.mode === 'belt' ? (r.done ? 'belt' : 'belt, ' + r.missing + ' cells to build') : r.mode === 'robot' ? 'robots' : 'idle'}`, w - 28, ry, { align: 'right', a: 0.45 }); ry += 13; } }
+    if (robots.length) { txt(c, `robots ${robots.length}   loose ${matter.total().toFixed(0)} kg${BP.clears.length ? '   terrain jobs ' + BP.clears.length : ''}`, w - 28, ry, { align: 'right', a: 0.6 }); ry += 15; for (const r of robots.slice(0, 3)) { const j = r.job, kg = inv.mass(r.cargo); txt(c, `${r.kind === 'crawler' ? 'hauler' : 'drone'} ${r.id}  ${j && j.kind === 'carry' ? (r.state === 'cfetch' ? 'to ' : 'carrying ') + j.item + ' > ' + (j.dst.t === 'mach' ? j.dst.m.kind : j.dst.t === 'inv' ? 'hold' : j.dst.t === 'dump' ? 'spoil heap' : 'you') : r.state}${kg > 0.05 ? '  ' + kg.toFixed(0) + ' kg' : ''}  ${(r.wh / (r.kind === 'crawler' ? 90 : ROBOT.wh) * 100).toFixed(0)}%`, w - 28, ry, { align: 'right', a: 0.4 }); ry += 13; } ry += 8; }
+    if (K.fab) { txt(c, `ship fabricator: ${K.fab.r}  ${Math.ceil(K.fab.left)} s`, w - 28, ry, { align: 'right', col: AMBER, a: 0.7 }); ry += 18; }
     if (S.printer.q.length) { const j = S.printer.q[0]; txt(c, `the arm is printing: ${j.r}  ${Math.ceil(j.left)} s${S.printer.q.length > 1 ? '  +' + (S.printer.q.length - 1) : ''}`, w - 28, ry, { align: 'right', col: AMBER, a: 0.7 }); ry += 18; }
     S.gains.forEach((g, i) => { drawIcon(c, g.id, w - 52, ry + i * 24 - 4, 22); txt(c, `+ ${fmtAmt(g.id, g.n) || 'x1'} ${g.id}`, w - 58, ry + i * 24 + 10, { align: 'right', a: Math.min(0.85, g.t) }); });
     // altitude tape and compass strip
     const alt = P.y; line(c, 28, h / 2 - 90, 28, h / 2 + 90, 0.25);
     for (let i = -4; i <= 4; i++) { const v = Math.round(alt / 5) * 5 + i * 5, yy = h / 2 - (v - alt) * 4; if (Math.abs(yy - h / 2) < 90) { line(c, 28, yy, 34, yy, 0.3); txt(c, v, 40, yy + 3, { a: 0.35 }); } }
     txt(c, `alt ${alt.toFixed(1)} m`, 46, h / 2 - 100); line(c, 22, h / 2, 34, h / 2, 0.8, AMBER);
-    line(c, w / 2 - 160, 30, w / 2 + 160, 30, 0.25);
-    for (let i = -8; i <= 8; i++) { const v = Math.round(P.x / 10) * 10 + i * 10, xx = w / 2 + (v - P.x) * 2; if (Math.abs(xx - w / 2) < 160) { line(c, xx, 30, xx, v % 50 === 0 ? 38 : 34, 0.3); if (v % 50 === 0) txt(c, v, xx, 50, { align: 'center', a: 0.35 }); } }
-    line(c, w / 2, 24, w / 2, 36, 0.8, AMBER); txt(c, `x ${P.x.toFixed(0)} m   v ${Math.hypot(P.vx, P.vy).toFixed(1)} m/s   g ${GRAV} m/s2   ${sites.inside ? STORY.sites[sites.inside.kind === 'base' && sites.inside.research ? 'lab' : sites.inside.kind] : BIOME[biome(P.x)]}`, w / 2, 20, { align: 'center', a: 0.45 });
+    // longitude strip (degrees east of the crash site), and the planet with you on top of it: the camera's up is your up
+    const lon = planet.lon(P.x), wl = v => ((v + 180) % 360 + 360) % 360 - 180; line(c, w / 2 - 160, 30, w / 2 + 160, 30, 0.25);
+    for (let i = -8; i <= 8; i++) { const v = Math.round(lon / 2) * 2 + i * 2, xx = w / 2 + (v - lon) * 10; if (Math.abs(xx - w / 2) < 160) { line(c, xx, 30, xx, v % 10 === 0 ? 38 : 34, 0.3); if (v % 10 === 0) txt(c, Math.abs(wl(v)) + (wl(v) < 0 ? ' w' : wl(v) > 0 ? ' e' : ''), xx, 50, { align: 'center', a: 0.35 }); } }
+    line(c, w / 2, 24, w / 2, 36, 0.8, AMBER); txt(c, `lon ${Math.abs(lon).toFixed(1)} ${lon < 0 ? 'w' : 'e'}   v ${Math.hypot(P.vx, P.vy).toFixed(1)} m/s   g ${GRAV} m/s2 to the centre   ${sites.inside ? STORY.sites[sites.inside.kind === 'base' && sites.inside.research ? 'lab' : sites.inside.kind] : BIOME[biome(P.x)]}`, w / 2, 20, { align: 'center', a: 0.45 });
+    { const px = w / 2 + 196, py = 31, pr = 13, mk = (deg, len, col, al) => { const a = (deg - lon) * Math.PI / 180; line(c, px + Math.sin(a) * pr, py - Math.cos(a) * pr, px + Math.sin(a) * (pr + len), py - Math.cos(a) * (pr + len), al, col); };
+      c.strokeStyle = `rgba(${INK},0.3)`; c.lineWidth = 1; c.beginPath(); c.arc(px, py, pr, 0, 6.2832); c.stroke(); mk(0, 4, INK, 0.7); mk(180, 4, RED, 0.7); mk(lon, 5, AMBER, 0.9); }
+    if (S.zo > 5) {      // far out: what the ship knows, marked on the planet itself
+      const al = sstep(5, 9, S.zo), mark = (x, y, label, col, k = 1) => { toScr(x, y + 8); if (scr[0] < -40 || scr[0] > w + 40 || scr[1] < -40 || scr[1] > h + 40) return; const u = planet.up(x - S.cam.x), ex = scr[0] + u[0] * 26 * k, ey = scr[1] - u[1] * 26 * k; line(c, scr[0], scr[1], ex, ey, 0.6 * al, col); txt(c, label, ex + u[0] * 8, ey - u[1] * 8 + 3, { align: u[0] > 0.3 ? 'left' : u[0] < -0.3 ? 'right' : 'center', col, a: 0.75 * al }); };
+      mark(P.x, P.y, 'you', AMBER, 1.5); if (S.crash) mark(SHIP.x, 2, 'wreck', INK);
+      const seen = {}; for (const m of F.machines) { const k = Math.round(m.x * TS / 60); if (m.kind !== 'belt' && !seen[k] && homeDist(m.x * TS) > 40) { seen[k] = 1; mark(m.x * TS, m.y * TS, 'outpost', INK, 0.8); } }
+      mark(planet.fix(CIRC / 2), surfaceH(CIRC / 2), 'hive: the main base', RED, 1.2);
+      if (S.zo > 40) txt(c, `radius ${RAD.toFixed(0)} m   ${CIRC} m around   g ${GRAV} m/s2   - = zoom   m back to the body`, w / 2, h - 100, { align: 'center', a: 0.4 });
+    }
     if (S.msgT > 0) txt(c, S.msg, w / 2, 84, { align: 'center', col: AMBER, a: Math.min(0.85, S.msgT) });
     if (F.pad) txt(c, F.pad.n >= ROCKET_PARTS ? 'rocket ready: e at the pad to board' : `rocket ${F.pad.n}/${ROCKET_PARTS} parts`, 28, h - 208, { col: AMBER, a: 0.8 });
     txt(c, F.printer ? 'bio-printer online: body respawns there' : 'no bio-printer: death restarts at the crash site', 28, h - 192, { a: 0.4 });
     if (S.slice) { const o = objective(); txt(c, '> ' + o, 28, 40, { col: AMBER, a: 0.6 }); }
     txt(c, `${combat ? 'combat' : bp ? 'blueprint' : 'build'} mode`, w / 2, h - 80, { align: 'center', col: combat ? RED : AMBER, a: bp ? 0 : 0.8 });
-    txt(c, combat ? 'lmb fire   rmb aim   r reload   1-9 weapon   c build mode' : bp ? '' : 'lmb ship laser   rmb place selected   v gather   x drop   q reactor   g laser legs   i inventory + arm   b blueprint   e use   f lamp', w / 2, h - 6, { align: 'center', a: 0.28 });
+    txt(c, combat ? 'lmb fire   rmb aim   r reload   1-9 weapon   c build mode' : bp ? '' : 'lmb ship laser   rmb place selected   v gather   x drop   q reactor   g laser legs   i inventory + arm   b blueprint   j ship ai   e use   f lamp   m planet', w / 2, h - 6, { align: 'center', a: 0.28 });
     const hint = kitHint() || sites.hint || (near ? `e  ${near.kind === 'pad' && near.n >= ROCKET_PARTS ? 'board the rocket' : 'open ' + near.kind}` : '');
     if (hint && !ui.open) txt(c, hint, w / 2, h / 2 + 120, { align: 'center', col: AMBER, a: 0.75 });
     if (BP.hand) { const g = BP.hand; txt(c, g.decon ? `taking apart ${g.kind}` : `building ${g.kind} by hand ${(g.prog * 100).toFixed(0)}%`, w / 2, h / 2 + 138, { align: 'center', a: 0.6 }); }
@@ -229,9 +299,9 @@ export const surface = {
         for (let i = 0; i < wp.mag; i++) { c.fillStyle = `rgba(${i < P.mag[wn] ? INK : '60,70,78'},${i < P.mag[wn] ? 0.7 : 0.4})`; c.fillRect(x0 + 50 + i * (wp.mag > 10 ? 4 : 12), h - 70, wp.mag > 10 ? 2 : 8, 8); }
         if (P.reload > 0) { line(c, mx - 14, my + 22, mx + 14, my + 22, 0.25); line(c, mx - 14, my + 22, mx - 14 + 28 * (1 - P.reload / wp.reload), my + 22, 0.9, AMBER); }
       } else if (L.state !== 'held') txt(c, 'unarmed', mx, my + 30, { align: 'center', col: RED, a: 0.8 }); else { line(c, mx - 9, my, mx - 3, my, 0.7, RED); line(c, mx + 3, my, mx + 9, my, 0.7, RED); line(c, mx, my - 9, mx, my - 3, 0.7, RED); line(c, mx, my + 3, mx, my + 9, 0.7, RED); }
-      for (const q of creatures) { if (!q.agg) continue; const sx = w / 2 + (q.x - S.cam.x) * S.ppm, sy = h / 2 - (q.y - S.cam.y) * S.ppm; if (sx > 0 && sx < w && sy > 0 && sy < h) { bracket(c, sx, sy, 14 + KIND[q.type].thick * 14, RED, 0.45); txt(c, `${q.type} ${Math.max(0, q.hp).toFixed(0)}`, sx + 20 + KIND[q.type].thick * 14, sy - 12, { col: RED, a: 0.5 }); } else { const a = Math.atan2(q.y - P.y, q.x - P.x); line(c, w / 2 + Math.cos(a) * 150, h / 2 - Math.sin(a) * 150, w / 2 + Math.cos(a) * 164, h / 2 - Math.sin(a) * 164, 0.8, RED); } }
+      for (const q of creatures) { if (!q.agg) continue; toScr(q.x, q.y); const sx = scr[0], sy = scr[1]; if (sx > 0 && sx < w && sy > 0 && sy < h) { bracket(c, sx, sy, 14 + KIND[q.type].thick * 14, RED, 0.45); txt(c, `${q.type} ${Math.max(0, q.hp).toFixed(0)}`, sx + 20 + KIND[q.type].thick * 14, sy - 12, { col: RED, a: 0.5 }); } else { const a = Math.atan2(q.y - P.y, q.x - P.x); line(c, w / 2 + Math.cos(a) * 150, h / 2 - Math.sin(a) * 150, w / 2 + Math.cos(a) * 164, h / 2 - Math.sin(a) * 164, 0.8, RED); } }
     } else if (!bp) { line(c, mx - 9, my, mx - 3, my, 0.7); line(c, mx + 3, my, mx + 9, my, 0.7); line(c, mx, my - 9, mx, my - 3, 0.7); line(c, mx, my + 3, mx, my + 9, 0.7); }
-    else { line(c, mx - 6, my, mx + 6, my, 0.5, AMBER); line(c, mx, my - 6, mx, my + 6, 0.5, AMBER); for (const g of BP.ghosts) if (!g.have && !S.has({ [g.kind === 'wall' ? 'iron' : g.kind]: g.kind === 'wall' ? 3 : 1 }) && !robots.length) { const sx = w / 2 + ((g.x + 0.5) * TS - S.cam.x) * S.ppm, sy = h / 2 - ((g.y + 1.5) * TS - S.cam.y) * S.ppm; txt(c, 'missing ' + (g.kind === 'wall' ? 'iron' : g.kind), sx, sy - 14, { align: 'center', col: RED, a: 0.55 }); } }
+    else { line(c, mx - 6, my, mx + 6, my, 0.5, AMBER); line(c, mx, my - 6, mx, my + 6, 0.5, AMBER); for (const g of BP.ghosts) if (!g.have && !S.has({ [g.kind === 'wall' ? 'iron' : g.kind]: g.kind === 'wall' ? 3 : 1 }) && !robots.length) { toScr((g.x + 0.5) * TS, (g.y + 1.5) * TS); const sx = scr[0], sy = scr[1]; txt(c, 'missing ' + (g.kind === 'wall' ? 'iron' : g.kind), sx, sy - 14, { align: 'center', col: RED, a: 0.55 }); } }
   },
   hide() { ui.update(false); },
 };
@@ -239,17 +309,17 @@ const r3 = v => +v.toFixed(3);
 function dumpSurface() {
   return { p: { x: r3(P.x), y: r3(P.y), vx: r3(P.vx), vy: r3(P.vy), hp: r3(P.hp), wh: r3(P.bat.wh), o2: +P.o2.toFixed(5), prop: r3(P.prop), slot: P.slot, mag: { ...P.mag }, lamp: light.lamp.on ? 1 : 0 },
     inv: inv.dump(S.inv), printer: S.printer.q.map(j => [j.r, r3(j.left), j.total]), corpse: S.corpse, mode: S.mode, crash: S.crash ? 1 : 0, slice: S.slice ? [r3(DIR.t), DIR.pred] : 0, calm: r3(S.calm), stats: { ...S.stats, kills: { ...S.stats.kills }, dug: r3(S.stats.dug), vapor: r3(S.stats.vapor) },
-    terrain: world.saveDiff(), flora: [...flora.dead].sort(), factory: dumpFactory(), bp: dumpBP(), robots: dumpRobots(), sites: dumpSites(), hive: dumpHive(), env: env.dump(), kit: dumpKit(), matter: matter.dump(), supply: dumpSupply() };
+    terrain: world.saveDiff(), flora: [...flora.dead].sort(), factory: dumpFactory(), bp: dumpBP(), robots: dumpRobots(), sites: dumpSites(), hive: dumpHive(), env: env.dump(), kit: dumpKit(), matter: matter.dump(), supply: dumpSupply(), auto: dumpAuto() };
 }
 function loadSurface(o) {
-  resetStructs(); world.loadDiff(o.terrain); resetFlora(); flora.dead = new Set(o.flora); creatures.length = 0; S.bullets.length = 0; S.parts.list.length = 0; heat.clear(); auto = null;
+  planet.reset(); resetStructs(); view.u.uProf.value.dispose(); view.u.uProf.value = profileTex(); S.zo = S.zoT = 1; world.loadDiff(o.terrain); resetFlora(); flora.dead = new Set(o.flora); creatures.length = 0; S.bullets.length = 0; S.parts.list.length = 0; heat.clear(); auto = null;
   const p = o.p; Object.assign(P, { x: p.x, y: p.y, vx: p.vx, vy: p.vy, hp: p.hp, o2: p.o2, prop: p.prop, slot: p.slot, dead: 0, ground: false, reload: 0, act: null, stumble: 0 }); P.bat.wh = p.wh; P.mag = { ...p.mag }; light.lamp.on = !!p.lamp; for (const f of P.rig.f) f.air = true;
   inv.load(S.inv, o.inv); S.printer.q = o.printer.map(([r, left, total]) => ({ r, left, total })); S.corpse = o.corpse; S.mode = o.mode; S.crash = !!o.crash; S.slice = !!o.slice; DIR.t = o.slice ? o.slice[0] : 0; DIR.pred = o.slice ? o.slice[1] : 0; S.calm = o.calm; S.stats = { ...o.stats, kills: { ...o.stats.kills } }; S.open = null; S.uiOpen = false; S.gains.length = 0;
-  loadFactory(o.factory); loadBP(o.bp); loadKit(o.kit); loadRobots(o.robots); loadSites(o.sites); loadHive(o.hive); env.load(o.env); matter.load(o.matter); loadSupply(o.supply);
-  S.cam.x = P.x; S.cam.y = P.y + 2.2; horizon = surfaceH(P.x);
+  loadFactory(o.factory); loadBP(o.bp); loadKit(o.kit); loadRobots(o.robots); loadSites(o.sites); loadHive(o.hive); env.load(o.env); matter.load(o.matter); loadSupply(o.supply); loadAuto(o.auto);
+  P.x = planet.update(P.x, true); S.cam.x = P.x; S.cam.y = P.y + 2.2; horizon = surfaceH(P.x);
 }
 // hooks for tools: time of each draw stage in ms, and the live state
 surface.profile = n => { const b = S.batch, t = {}, T = (k, f) => { const t0 = performance.now(); for (let i = 0; i < n; i++) f(i); t[k] = +((performance.now() - t0) / n).toFixed(2); };
   T('floraBack', i => { b.begin(S.cam.x, S.cam.y, S.ppm); drawFlora(b, i * 0.016, false); t.sprites = b.n; }); T('floraFront', i => { b.begin(S.cam.x, S.cam.y, S.ppm); drawFlora(b, i * 0.016, true); }); T('backdrop', i => { drawBackdrop(S.cam.x, S.cam.y, S.ppm, i * 0.016, 0); t.backSprites = backdrop.batch.n; }); T('sites', i => drawSites(b, i)); T('parts', () => S.parts.draw(b, 1.2)); T('end', () => b.end());
   T('light', i => computeLight(S.cam.x / TS, S.cam.y / TS, i)); T('terrain', i => updateTerrain(S.cam.x, S.cam.y, S.ppm, i, 0)); T('window', () => { world.rev++; updateTerrain(S.cam.x, S.cam.y, S.ppm, 0, 0); }); return t; };
-surface.debug = { S, P, F, BP, K, SUP, robots, creatures, hive, env, flora, world, sites, matter, heat, backdrop, siteUse, kitUse, spawnCreature, spawnHerd, hurt, slotStruct, structsIn, stance, KIND };
+surface.debug = { planet, AUTO, queueView, inv, S, P, F, BP, K, SUP, robots, creatures, hive, env, flora, world, sites, matter, heat, backdrop, siteUse, kitUse, spawnCreature, spawnHerd, hurt, slotStruct, structsIn, stance, KIND };

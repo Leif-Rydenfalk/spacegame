@@ -2,7 +2,7 @@
 import { Particles } from '../render.js';
 import { makeInv, inv, CARRY, ITEMS } from '../items.js';
 export const S = {
-  batch: null, parts: new Particles(7000), cam: { x: 0, y: 2 }, ppm: 60, zoom: 1, mouse: { x: 0, y: 0 },
+  batch: null, parts: new Particles(7000), cam: { x: 0, y: 2 }, ppm: 60, zoom: 1, zo: 1, zoT: 1, far: 0, lod: 0, mouse: { x: 0, y: 0 },
   inv: makeInv(36), printer: { q: [], stall: '' }, bullets: [], decals: [], lights: [], P: null, calm: 0, corpse: null, flash: 0,
   mode: 'build', uiOpen: false, msg: '', msgT: 0, stats: { kills: {}, dug: 0, vapor: 0, shots: 0 }, open: null,
   // amounts are floats; add returns what did not fit (slot space or the suit's carry limit)

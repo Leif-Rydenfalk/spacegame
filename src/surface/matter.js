@@ -65,7 +65,7 @@ export const matter = {
   draw(b, time) {
     const cam = S.cam;
     for (const c of this.list) {
-      if (Math.abs(c.x - cam.x) > 24 || Math.abs(c.y - cam.y) > 14) continue;
+      if (Math.abs(c.x - cam.x) > 24 * Math.min(S.zo, 4) || Math.abs(c.y - cam.y) > 14 * Math.min(S.zo, 4)) continue;
       const d = ITEMS[c.id], col = d.c || C.steel, org = ORG[c.id];
       if (d.u === 'ea' || d.u === 'rd') { b.add(c.x, c.y, c.r * 1.7, c.r * 1.4, c.rot, mul(C.steel, 0.7), 1, 0, 1, c.seed); b.add(c.x, c.y, c.r * 0.5, c.r * 0.4, c.rot, mul(col, 1.2), 1, 0, 2, 1); b.add(c.x, c.y + c.r * 0.5, c.r * 1.7, 0.03, c.rot, mul(C.hull, 0.6), 1, 0, 1); continue; }
       const n = c.kg > 45 ? 5 : c.kg > 18 ? 3 : 1, dark = org ? 0.22 : 0.42;

@@ -4,13 +4,17 @@
 // identity can replace it later with save.use(adapter): nothing else in the game touches storage.
 // A blob is { version, rev, savedAt, hash, data }. data = { seed, act, time, playerId, parts: { name: dump } }.
 import { G } from './core.js';
-export const VERSION = 3;
+export const VERSION = 4;
 // version n -> n + 1. Version 1 was demo 1, which had no saves. Version 3 (round 3) added the kit (ship laser and
 // reactor instead of the laser drill item), loose matter, the ship hold and the stock targets: a version 2 save gets
 // the kit on the player's back, an empty hold, and no loose matter. Its rifle and shotgun stay in the pack.
 const MIGRATE = { 1: b => { b.version = 2; return b; }, 2: b => { b.version = 3; const s = b.data && b.data.parts && b.data.parts.surface;
   if (s && !s.kit) { s.kit = { r: ['carried', 0, 0], l: ['held', 0, 0, 0, +(s.p && s.p.heat) || 0], hold: new Array(24).fill(0), pend: {}, awake: 0 }; s.matter = []; s.supply = null; s.inv = (s.inv || []).map(q => q && q[0] === 'laser drill' ? 0 : q); }
-  return b; } };
+  return b; },
+  // version 4 (round 4): the world is a round planet. A flat round 3 save maps straight onto it: x was metres from the
+  // crash site and still is, now along the circumference (anything beyond half of it wraps round); edited terrain
+  // chunks are folded onto the circle when they load; the build queue gets its order, the ship AI its routes.
+  3: b => { b.version = 4; const s = b.data && b.data.parts && b.data.parts.surface; if (s && s.auto === undefined) s.auto = { on: 1, st: [] }; return b; } };
 const parts = {};
 export function fnv(str) { let h = 0x811c9dc5; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(16).padStart(8, '0'); }
 

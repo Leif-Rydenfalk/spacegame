@@ -1,7 +1,7 @@
 {
   "name": "spacegame",
-  "version": "0.3.0",
-  "description": "spacegame demo 1, round 3: a many-layered living forest, a carried reactor and ship laser, loose matter, wary ecology and a demand and supply AI on a smooth voxel world, and a real-scale orbital act, one page, three.js",
+  "version": "0.4.0",
+  "description": "spacegame demo 1, round 4: a whole round planet with radial gravity and a camera that turns with it, an automation-first base (auto-built queue, AI-laid conveyors, ground haulers, power budget), and a real-scale orbital act, one page, three.js",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",

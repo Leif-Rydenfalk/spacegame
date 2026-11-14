@@ -6,7 +6,7 @@
 // and bends in the same wind.
 import { THREE, R, Batch, makeRT } from '../render.js';
 import { G, hash, rng, noise2, clamp, lerp } from '../core.js';
-import { biome } from './gen.js';
+import { biome, canonX, homeDist } from './gen.js';
 import { genPlant, drawPlant, wind, PAL } from './flora-gen.js';
 import { S, mul } from './state.js';
 
@@ -27,59 +27,59 @@ const FOG = [[0.011, 0.033, 0.038], [0.026, 0.017, 0.048], [0.018, 0.034, 0.012]
 const SMALL = ['fern', 'paddle', 'grass', 'reed', 'bulb', 'fungi', 'fern', 'grass', 'flower'];
 export const ridgeH = (x, s) => 0.5 + 0.5 * (Math.sin(x * 0.11 + s) * 0.5 + Math.sin(x * 0.047 + s * 2.3) * 0.9 + Math.sin(x * 0.31 + s * 4.1) * 0.2 + Math.sin(x * 0.83 + s * 7.7) * 0.07 + Math.sin(x * 1.9 + s * 3.3) * 0.03 + Math.sin(x * 4.3 + s) * 0.012) / 1.712;
 
-const SKY = `
-precision highp float; varying vec2 vV; uniform vec2 uCam, uRes; uniform float uPPM, uTime, uHorizon; uniform vec3 uFog;
-float h(vec2 p){ p=fract(p*vec2(443.897,441.423)); p+=dot(p,p.yx+19.19); return fract((p.x+p.y)*p.x); }
-float vn(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.-2.*f); return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y); }
-float fb(vec2 p){ return vn(p)*.5+vn(p*2.03)*.25+vn(p*4.1)*.125+vn(p*8.3)*.0625; }
-void main(){
-  vec2 sv = vV/uRes.y; float hy = (uHorizon-uCam.y)*uPPM;
-  vec3 sky = mix(vec3(.0011,.0028,.0058), vec3(.005,.015,.02), smoothstep(.55,-.3,sv.y));
-  for(int i=0;i<3;i++){ float fi=float(i); vec2 p=(vV+uCam*uPPM*(.004+.004*fi))/(3.+fi*2.); vec2 ci=floor(p); float r=h(ci+fi*13.);
+// the sky, as a GLSL function the terrain shader calls for every pixel of open air (it needs h, vn, fb and the uniforms
+// uRes, uPPM, uCam, uTime, uHorizon, uFog, uSky). uSky = (camera angle round the planet, far): the camera turns with
+// gravity, so the stars, the dust lane and the ringed giant turn the other way about a point under the horizon; on the
+// far side of the planet the giant has set. far 0..1 is the zoom out to the whole planet: the pivot goes to the centre.
+export const SKYFN = `
+vec3 skyCol(vec2 vv){
+  float th=uSky.x, far=uSky.y, cs=cos(th), sn=sin(th); vec2 sv0=vv/uRes.y, piv=vec2(0.,mix(-.6,0.,far)), d=sv0-piv, sv=vec2(cs*d.x+sn*d.y,-sn*d.x+cs*d.y)+piv, rv=sv*uRes.y;
+  float hy=(uHorizon-uCam.y)*uPPM;
+  vec3 sky = mix(mix(vec3(.0011,.0028,.0058), vec3(.005,.015,.02), smoothstep(.55,-.3,sv0.y)), vec3(.0008,.0017,.0036), far);
+  for(int i=0;i<3;i++){ float fi=float(i); vec2 p=rv/(3.+fi*2.); vec2 ci=floor(p); float r=h(ci+fi*13.);
     float tw=.7+.3*sin(uTime*(1.+r*3.)+r*40.); vec2 sp=fract(p)-.5-(vec2(h(ci+1.),h(ci+2.))-.5)*.6;
     sky += mix(vec3(1.,.75,.55),vec3(.6,.8,1.),h(ci+5.))*step(.955+fi*.012,r)*smoothstep(.2,.0,length(sp))*tw*(.5-.12*fi); }
-  // a long dust lane across the sky
-  { vec2 p=sv*vec2(1.,2.4)+vec2(.2,-.5)+uCam*.0004; float b=fb(p*3.+fb(p*7.)*.6); sky += vec3(.012,.016,.03)*pow(b,3.)*smoothstep(.9,.1,abs(p.y+p.x*.35)); }
-  vec2 gp = sv-vec2(.42,.2)-vec2(uCam.x*.00002,0.); float gd=length(gp)/.21;
-  if(gd<1.){ float lit=smoothstep(-.25,.7,dot(gp/.21,normalize(vec2(-.8,.45)))+sqrt(1.-gd*gd)*.2); float band=fb(vec2(gp.y*38.+fb(gp*9.)*1.5,gp.x*2.));
-    float rs=1.-.6*smoothstep(.02,.0,abs(gp.y+gp.x*.05+.012))*step(gp.x,.1);
+  { vec2 p=sv*vec2(1.,2.4)+vec2(.2,-.5); float b=fb(p*3.+fb(p*7.)*.6); sky += vec3(.012,.016,.03)*pow(b,3.)*smoothstep(.9,.1,abs(p.y+p.x*.35)); }
+  vec2 gp = sv-vec2(.42,.2); float gs=mix(.21,.085,far), gd=length(gp)/gs;
+  if(gd<1.){ float lit=smoothstep(-.25,.7,dot(gp/gs,normalize(vec2(-.8,.45)))+sqrt(1.-gd*gd)*.2); float band=fb(vec2(gp.y/gs*8.+fb(gp/gs*1.9)*1.5,gp.x/gs*.42));
+    float rs=1.-.6*smoothstep(.02,.0,abs(gp.y+gp.x*.05+.012)/gs*.21)*step(gp.x,.1*gs/.21);
     sky = mix(sky, vec3(.115,.088,.135)*(.35+band)*lit*rs*smoothstep(1.,.96,gd)+vec3(.004,.006,.01), smoothstep(1.,.985,gd)); sky += vec3(.03,.045,.08)*pow(gd,6.)*lit*.5; }
   else { sky += vec3(.03,.04,.07)*exp(-(gd-1.)*11.)*.55; }
-  float rg=length(gp*vec2(1.,3.6))/.21; if(rg>1.25&&rg<2.1&&(gd>1.||gp.y<0.)) sky += vec3(.05,.045,.06)*(.4+.6*vn(vec2(rg*60.,0.)))*(.6+.4*vn(vec2(rg*230.,1.)))*smoothstep(1.25,1.3,rg)*smoothstep(2.1,2.,rg);
-  // thin high cloud, lit from the planet's side
-  { vec2 p=vec2(sv.x*1.6+uCam.x*.0006+uTime*.0015, sv.y*5.); float c=fb(p*2.+fb(p*5.3+uTime*.004)*.7); c=smoothstep(.45,.8,c)*smoothstep(-.1,.35,sv.y);
-    sky = mix(sky, sky*.55+vec3(.014,.02,.03)*(.6+.8*smoothstep(.6,.0,length(gp))), c*.6); }
-  // two far ridges
-  for(int i=0;i<2;i++){ float fi=float(i), par=.03+.03*fi; float x=(uCam.x*par+vV.x/uPPM)*.07*(1.+fi*.6)+fi*40.; float ridge=(fb(vec2(x,fi*9.))-.35)*uRes.y*(.42-.14*fi)+hy*par+uRes.y*(.08-.05*fi);
-    float m=smoothstep(ridge+1.5,ridge-1.5,vV.y); sky = mix(sky, mix(vec3(.0016,.0045,.006)*(1.6-fi), uFog*.55, .5+.2*fi)+uFog*exp(-(ridge-vV.y)/uRes.y*7.)*.5, m); }
-  sky += uFog*exp(-abs(vV.y-hy*.06-uRes.y*.05)/uRes.y*5.)*.75;
-  gl_FragColor = vec4(sky,1.);
+  float rg=length(gp*vec2(1.,3.6))/gs; if(rg>1.25&&rg<2.1&&(gd>1.||gp.y<0.)) sky += vec3(.05,.045,.06)*(.4+.6*vn(vec2(rg*60.,0.)))*(.6+.4*vn(vec2(rg*230.,1.)))*smoothstep(1.25,1.3,rg)*smoothstep(2.1,2.,rg);
+  float near=1.-far;
+  if(near>.001){
+    // thin high cloud, lit from the giant's side; it belongs to the air over the ground, so it does not turn
+    { vec2 p=vec2(sv0.x*1.6+sn*1.3+uTime*.0015, sv0.y*5.+cs); float c=fb(p*2.+fb(p*5.3+uTime*.004)*.7); c=smoothstep(.45,.8,c)*smoothstep(-.1,.35,sv0.y);
+      sky = mix(sky, sky*.55+vec3(.014,.02,.03)*(.6+.8*smoothstep(.6,.0,length(gp))), c*.6*near); }
+    // two far ridges: noise on a circle, so they close round the planet
+    for(int i=0;i<2;i++){ float fi=float(i), par=.03+.03*fi, k=.07*(1.+fi*.6); vec2 q=vec2(cs,sn)*(uPl.x*par*k)+vec2(-sn,cs)*(vv.x/uPPM*k)+fi*40.; float ridge=(fb(q)-.35)*uRes.y*(.42-.14*fi)+hy*par+uRes.y*(.08-.05*fi);
+      float m=smoothstep(ridge+1.5,ridge-1.5,vv.y)*near; sky = mix(sky, mix(vec3(.0016,.0045,.006)*(1.6-fi), uFog*.55, .5+.2*fi)+uFog*exp(-(ridge-vv.y)/uRes.y*7.)*.5, m); }
+    sky += uFog*exp(-abs(vv.y-hy*.06-uRes.y*.05)/uRes.y*5.)*.75*near;
+  }
+  return sky;
 }`;
 
 export const backdrop = { rt: null, scene: null, batch: null, fore: [], fog: [0.012, 0.03, 0.035], glare: 0, fauna: [], scare: 0 };
 const pools = [], trees = [];
-let skyU = null;
 export function initBackdrop(mainScene) {
   const bd = backdrop; bd.rt = makeRT(0.5); bd.scene = new THREE.Scene();
-  skyU = { uCam: { value: new THREE.Vector2() }, uRes: { value: new THREE.Vector2(1, 1) }, uPPM: { value: 60 }, uTime: { value: 0 }, uHorizon: { value: 0 }, uFog: { value: new THREE.Vector3() } };
-  const sky = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({ uniforms: skyU, depthTest: false, depthWrite: false, fragmentShader: SKY, vertexShader: 'uniform vec2 uRes; varying vec2 vV; void main(){ vV=position.xy*uRes*.5; gl_Position=vec4(position.xy,0.,1.); }' }));
-  sky.frustumCulled = false; sky.renderOrder = 0; bd.scene.add(sky);
   bd.batch = new Batch(bd.scene, 36000, 1); bd.batch.u.uSun.value.set(0.5, 0.86); bd.batch.u.uRim.value.set(0.004, 0.007, 0.008);
   for (const f of FORE) { const b = new Batch(mainScene, 3000, 20 + bd.fore.length); b.u.uSoft.value = f.soft; b.u.uSun.value.set(0.5, 0.86); bd.fore.push(b); }
   // a pool of every species: the layers draw from it, so nothing is generated while the camera moves
   for (let bi = 0; bi < 3; bi++) { const r = rng(9001 + bi * 77); trees[bi] = []; for (let i = 0; i < 12; i++) trees[bi].push(genPlant('tree', bi, r, 0.5 + r() * 0.7)); pools[bi] = {}; for (const t of new Set(SMALL)) { pools[bi][t] = []; for (let i = 0; i < 5; i++) pools[bi][t].push(genPlant(t, bi, r, 0.7 + r() * 0.5)); } pools[bi].vine = []; for (let i = 0; i < 5; i++) pools[bi].vine.push(genPlant('vine', bi, r, 1.3, { anchor: -1 })); }
-  R.pre.push(() => { const r = R.renderer, t = r.getRenderTarget(); r.setRenderTarget(bd.rt); r.render(bd.scene, R.camera); r.setRenderTarget(t); });
+  // the layers go into the target with their coverage in alpha (the sky is not in it: the terrain shader draws the sky)
+  R.pre.push(() => { if (bd.skip) return; const r = R.renderer, t = r.getRenderTarget(); r.setRenderTarget(bd.rt); r.setClearColor(0x000000, 0); r.clear(); r.render(bd.scene, R.camera); r.setClearColor(0x000000, 1); r.setRenderTarget(t); });
   for (let li = 2; li < LAYERS.length; li++) for (let i = 0; i < 3; i++) bd.fauna.push({ li, x: (hash(li, i, 300) - 0.5) * 120, v: 0, dir: hash(li, i, 301) < 0.5 ? -1 : 1, t: hash(li, i, 302) * 6, ph: hash(li, i, 303) * 6.28, kind: i === 2 ? 1 : 0, y: 0, graze: 0 });
 }
 // groves and clearings in world x, shared by every layer, so the sky and the planet show through all of them at once.
 // The crash site is one: the transport tore the canopy open on its way down.
-const grove = wx => clamp(noise2(wx * 0.011, 7, 46) * 3.2 - 0.85, 0.06, 1.15) * (0.12 + 0.88 * clamp((Math.abs(wx) - 14) / 34, 0, 1));
+const grove = wx => clamp(noise2(canonX(wx) * 0.011, 7, 46) * 3.2 - 0.85, 0.06, 1.15) * (0.12 + 0.88 * clamp((homeDist(wx) - 14) / 34, 0, 1));
 const tint = { k: 1, fog: [0, 0, 0], f: 0, e: 1, lod: 0.7 }, col = [0, 0, 0];
 // camera in metres, ppm, time; horizon = the smoothed surface height under the camera
 export function drawBackdrop(cx, cy, ppm, time, horizon) {
   const bd = backdrop, b = bd.batch, hw = G.w / 2, hh = G.h / 2, tg = FOG[biome(cx)], fg = bd.fog, gl = bd.glare;
   for (let i = 0; i < 3; i++) fg[i] = lerp(fg[i], tg[i], 0.01);
-  skyU.uCam.value.set(cx, cy); skyU.uRes.value.set(G.w, G.h); skyU.uPPM.value = ppm; skyU.uTime.value = time; skyU.uHorizon.value = horizon; skyU.uFog.value.set(fg[0], fg[1], fg[2]);
+  bd.skip = S.far >= 1; if (bd.skip) { for (const f of bd.fore) { f.begin(0, 0, 1); f.end(); } return; }      // zoomed out to the planet: the layers are not drawn
   b.begin(0, 0, 1); b.u.uTime.value = time;
   for (let li = 0; li < LAYERS.length; li++) {
     const L = LAYERS[li], k = ppm * L.s, seed = 1.7 + li * 3.1, X0 = cx * L.p / L.s, half = hw / k, base = ((horizon - cy) * L.p + L.lift) * ppm, near = L.p * L.p;
