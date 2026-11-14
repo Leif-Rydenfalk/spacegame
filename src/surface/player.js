@@ -14,11 +14,14 @@ import { heatAt } from './terrain.js';
 import { S, C, mul } from './state.js';
 import { env } from './env.js';
 import { ITEMS, RECIPE, inv, printerStep, CARRY } from '../items.js';
-import { creatures, hurtCreature, ik2 } from './creatures.js';
+import { creatures, hurtCreature, hurtPunch, ik2, KIND } from './creatures.js';
 import { floraHit, floraBlast } from './flora.js';
 import { F } from './factory.js';
 import { matter } from './matter.js';
-import { mobility, REACTOR_KG } from './power.js';
+import { mobility, REACTOR_KG, ARM_W, SUIT_BUS_W } from './power.js';
+import { EXO, BOOT, NEEDS, MASK, suitStats, suitHit, stepNeeds } from './suit.js';
+import { breathable } from './wreck.js';
+import { FIST } from './physics.js';
 import { deckUnder, deckStep } from './layers.js';
 import { cursorKind, thingAt } from './blueprint.js';
 import { K, kitKg, hasLaser, hasReactor, drawReactor, drawLaser } from './kit.js';
@@ -33,9 +36,10 @@ export const P = { x: 0, y: 0, vx: 0, vy: 0, ground: false, face: 1, hp: 100, ba
   hurtT: 0, recoil: 0, bloom: 0, ads: 0, hitT: 0, weapon: null, charging: false, wa: 0, wv: 0, gx: 0, gy: 1.3, act: null, wantFire: false, exert: 0, stumble: 0, load: 0, reach: null, gatherT: 0,
   rig: { f: [foot(), foot()], py: 0.88, pv: 0, lean: 0, lv: 0, lvx: 0, ax: 0, breath: 0, sdir: 1, head: 0 } };
 const R = 0.3, nv = [0, 0], HIP0 = 0.88, THIGH = 0.46, SHIN = 0.46;
-export function spawnAt(x) { P.x = x; P.y = (world.groundY(x, surfaceH(x) + 6, 0, 30) || surfaceH(x)) + 0.05; P.vx = P.vy = 0; P.hp = 100; P.dead = 0; P.prop = SUIT.prop; P.o2 = SUIT.o2; P.bat.wh = Math.max(P.bat.wh, 200); P.act = null; P.stumble = 0; for (const f of P.rig.f) f.air = true; safe.x = P.x; safe.y = P.y; safe.ok = bodyDepth() < 0.03; }
-export function hurt(d, kx = 0, ky = 0) {
-  if (P.dead) return; P.hp -= d; P.vx += kx; P.vy += ky; S.flash = Math.min(1, S.flash + d / 30); G.shake += d * 0.012; P.hurtT = 0.5; audio.play('hit'); if (d > 4) stumble(0.35 + d * 0.01, Math.sign(kx) || -P.face);
+export function spawnAt(x) { P.x = x; P.y = (world.groundY(x, surfaceH(x) + 6, 0, 30) || surfaceH(x)) + 0.05; P.vx = P.vy = 0; P.hp = 100; P.dead = 0; P.prop = SUIT.prop; P.o2 = EXO.on ? MASK.suit : MASK.bare; P.bat.wh = Math.max(P.bat.wh, 200); P.act = null; P.punch = null; P.stumble = 0; for (const f of P.rig.f) f.air = true; safe.x = P.x; safe.y = P.y; safe.ok = bodyDepth() < 0.03; }
+// by = the creature that did it: the body defends itself against whatever attacks it (defence below)
+export function hurt(d, kx = 0, ky = 0, by = null) {
+  if (P.dead) return; if (by) { S.attacker = by; S.attackT = G.time; } if (NEEDS.asleep > 0 && d > 0.5) { NEEDS.asleep = 0; S.say('something woke you', 3); } d = suitHit(d); if (!EXO.on) { kx *= 1.4; ky *= 1.2; } P.hp -= d; P.vx += kx; P.vy += ky; S.flash = Math.min(1, S.flash + d / 30); G.shake += d * 0.012; P.hurtT = 0.5; audio.play('hit'); if (d > 4) stumble(0.35 + d * 0.01, Math.sign(kx) || -P.face);
   if (P.dead) return;
   if (P.hp <= 0) { P.dead = 3; S.corpse = { x: P.x, y: P.y, inv: inv.dump(S.inv) }; S.inv.slots.fill(null); S.printer.q.length = 0; P.act = null; events.emit('died'); }
 }
@@ -98,19 +102,23 @@ export function stepPlayer(dt) {
   S.flash = Math.max(0, S.flash - dt * 1.5); P.hurtT = Math.max(0, P.hurtT - dt); P.flashT -= dt; P.cool -= dt; P.hitT -= dt; S.msgT -= dt; P.stumble = Math.max(0, P.stumble - dt);
   for (let i = S.gains.length - 1; i >= 0; i--) if ((S.gains[i].t -= dt) <= 0) S.gains.splice(i, 1);
   P.wantFire = false; P.reach = null;
-  if (P.dead > 0) { P.dead -= dt; audio.loop('engine', 0); if (P.dead <= 0) { const pr = F.printer; if (pr) { P.x = (pr.x + pr.w / 2) * TS + 1.4; P.y = pr.y * TS + 0.1; P.vx = P.vy = 0; P.hp = 100; P.dead = 0; P.o2 = SUIT.o2; P.prop = SUIT.prop; P.bat.wh = SUIT.bat; } else spawnAt(0); if (K.laser.state === 'held' || K.reactor.state === 'carried') { /* the kit stays where the body fell: go and get it */ if (K.reactor.state === 'carried' && S.corpse) { K.reactor.state = 'ground'; K.reactor.x = S.corpse.x; K.reactor.y = S.corpse.y + 0.3; K.reactor.vy = 0; } if (K.laser.state === 'held' && S.corpse) { K.laser.state = 'turret'; K.laser.x = S.corpse.x + 0.8; K.laser.y = S.corpse.y; K.laser.ang = 0.2; } } } return; }
+  if (P.dead > 0) { P.dead -= dt; audio.loop('engine', 0); if (P.dead <= 0) { EXO.cond = Math.max(EXO.cond, 0.35); if (EXO.cond > 0 && BOOT.done) EXO.on = true; EXO.wear.actuators = Math.max(EXO.wear.actuators === undefined ? 1 : EXO.wear.actuators, 0.5); NEEDS.food = Math.max(NEEDS.food, 0.5); NEEDS.water = Math.max(NEEDS.water, 0.5);       /* the one suit comes back with you, patched up, not new */ const pr = F.printer; if (pr) { P.x = (pr.x + pr.w / 2) * TS + 1.4; P.y = pr.y * TS + 0.1; P.vx = P.vy = 0; P.hp = 100; P.dead = 0; P.o2 = SUIT.o2; P.prop = SUIT.prop; P.bat.wh = SUIT.bat; } else spawnAt(0); if (K.laser.state === 'held' || K.reactor.state === 'carried') { /* the kit stays where the body fell: go and get it */ if (K.reactor.state === 'carried' && S.corpse) { K.reactor.state = 'ground'; K.reactor.x = S.corpse.x; K.reactor.y = S.corpse.y + 0.3; K.reactor.vy = 0; } if (K.laser.state === 'held' && S.corpse) { K.laser.state = 'turret'; K.laser.x = S.corpse.x + 0.8; K.laser.y = S.corpse.y; K.laser.ang = 0.2; } } } return; }
   const ui = S.uiOpen, busy = !!P.act, combat = S.mode === 'combat', ads = combat && input.down[2] && !ui;
   P.ads += ((ads ? 1 : 0) - P.ads) * Math.min(1, dt * 9);
-  const load = P.load = inv.mass(S.inv) + kitKg(), mob = P.mob = mobility(load), sprint = input.key('Shift') && !ads;
-  const ax = ui || busy ? 0 : (input.key('d') ? 1 : 0) - (input.key('a') ? 1 : 0), max = (sprint ? mob.sprint : mob.speed) * (1 - 0.45 * P.ads) * (P.stumble > 0 ? 0.4 : 1), acc = P.ground ? mob.acc : 6;
+  // what the body can do comes from the suit it is in, or from itself; the needs slow it (suit.js)
+  const st = P.st = suitStats(), air = breathable(), nd = stepNeeds(dt, { exert: P.exert, inAir: air }); P.bat.cap = st.wh || 1; if (!st.on) P.bat.wh = 0; else if (P.bat.wh > P.bat.cap) P.bat.wh = P.bat.cap; P.inAir = air; S.carry = st.carry;
+  const load = P.load = inv.mass(S.inv) + kitKg(), mob = P.mob = mobility(load, st.body), sprint = input.key('Shift') && !ads && !P.wantFire; mob.speed *= nd.slow; mob.sprint *= nd.slow; if (nd.hurt > 0) hurt(nd.hurt * dt);
+  if (NEEDS.asleep > 0) { input.keys.delete('a'); input.keys.delete('d'); }
+  const keyX = (input.key('d') ? 1 : 0) - (input.key('a') ? 1 : 0), ax = ui || busy || NEEDS.asleep > 0 ? 0 : keyX || (P.autoX || 0), max = (sprint ? mob.sprint : mob.speed) * (1 - 0.45 * P.ads) * (P.stumble > 0 ? 0.4 : 1), acc = P.ground ? mob.acc : 6;
   if (ax) { if (P.vx * ax < max) P.vx = clamp(P.vx + ax * acc * dt, -Math.max(max, Math.abs(P.vx)), Math.max(max, Math.abs(P.vx))); }
   if (P.ground && (!ax || P.vx * ax < 0 || Math.abs(P.vx) > max)) P.vx -= Math.sign(P.vx) * Math.min(Math.abs(P.vx), (16 - 5 * mob.k) * dt);
   P.air = P.ground ? 0 : P.air + dt;
-  const up = !ui && !busy && (input.key('w') || input.key(' '));
+  const up = !ui && !busy && !P.noJump && NEEDS.asleep <= 0 && (input.key('w') || input.key(' ')); P.noJump = false;
   let jumped = false; if (up && P.ground && P.stumble <= 0) { P.vy = mob.jump; P.ground = false; jumped = true; P.exert = Math.min(1, P.exert + 0.08 + mob.k * 0.15); P.rig.pv += 1.2; }
   let jet = false;
-  if (!ui && !busy && input.key(' ') && !P.ground && P.air > 0.22 && P.prop > 0) { jet = true; P.vy += mob.jet * dt; P.prop = Math.max(0, P.prop - SUIT.jetRate * dt); env.noise(P.x, P.y, 22); }
-  if (P.ground && P.prop < SUIT.prop && P.bat.wh > 1) { const k = Math.min(SUIT.prop - P.prop, 0.45 * dt); P.prop += k; P.bat.wh -= k * 1.5; }      // intake compressor: 1.5 Wh per kg
+  if (!ui && !busy && (input.key(' ') || P.autoJet > 0) && !P.ground && P.air > (P.autoJet > 0 ? 0.05 : 0.22) && P.prop > 0 && mob.jet > 0) { jet = true; P.vy += mob.jet * dt; P.prop = Math.max(0, P.prop - SUIT.jetRate * dt); env.noise(P.x, P.y, 22); }
+  if (P.autoJet > 0) P.autoJet -= dt; if (P.prop > st.prop) P.prop = st.prop;
+  if (P.ground && P.prop < st.prop && P.bat.wh > 1) { const k = Math.min(st.prop - P.prop, 0.45 * dt); P.prop += k; P.bat.wh -= k * 1.5; }      // intake compressor: 1.5 Wh per kg
   if (jet) {
     for (let i = 0; i < 2; i++) S.parts.spawn({ x: P.x - P.face * 0.22, y: P.y + 0.85, vx: P.vx + rand(-1, 1), vy: P.vy - rand(7, 12), life: rand(0.12, 0.3), size: rand(0.08, 0.2), c: [3, 1.6, 0.6], c2: [0.8, 0.1, 0.02], grav: 0 });
     light.emit(P.x / TS, P.y / TS + 1, 0.9, 0.45, 0.15); if (Math.random() < dt * 20) floraBlast(P.x, P.y - 1, 2.5, 0.6);
@@ -130,19 +138,28 @@ export function stepPlayer(dt) {
   if (g && heat.at(P.x, P.y - 0.1) > 0.75) hurt(22 * dt);                              // molten ground
   P.exert = clamp(P.exert + dt * ((sprint && ax ? 0.14 : 0) + (ax ? mob.k * 0.1 : 0) - 0.07), 0, 1);
   P.bloom = Math.max(0, P.bloom - dt * 0.09); P.recoil *= Math.exp(-dt * 9);
-  P.aim = Math.atan2(S.mouse.y - (P.y + 1.36), S.mouse.x - P.x) + P.recoil * (Math.cos(P.aim) >= 0 ? 1 : -1); P.face = Math.cos(P.aim) >= 0 ? 1 : -1;
+  const def = defend(dt, ui, busy);
+  P.aim = (def ? Math.atan2(def.y - (P.y + 1.36), def.x - P.x) : Math.atan2(S.mouse.y - (P.y + 1.36), S.mouse.x - P.x)) + P.recoil * (Math.cos(P.aim) >= 0 ? 1 : -1); P.face = Math.cos(P.aim) >= 0 ? 1 : -1;
   // suit: oxygen, battery, cells, the arm's matter compiler
-  P.o2 = Math.max(0, P.o2 - SUIT.o2Rate * (1 + P.exert * 0.6) * dt); if (P.o2 <= 0) hurt(4 * dt);
-  P.bat.wh = Math.min(P.bat.cap, P.bat.wh + SUIT.rtgW * dt / 3600); if (light.lamp.on) P.bat.wh = Math.max(0, P.bat.wh - SUIT.lampW * dt / 3600);
-  if (P.o2 < 0.12 && inv.take(S.inv, 'o2 cell', 1) > 0) { P.o2 = SUIT.o2; S.say('o2 cell used'); events.emit('used', 'o2 cell'); }
+  // the air is not breathable: what you breathe is in the mask's tank (a small one on the bare mask, the suit's when it
+  // is on). In the wreck's sealed section the air holds and the tank fills from it; so it does beside a running pump.
+  P.o2cap = st.o2; if (P.o2 > st.o2) P.o2 = st.o2; P.o2 = Math.max(0, P.o2 - nd.o2); if (air || P.pumpNear) P.o2 = Math.min(st.o2, P.o2 + 0.01 * dt); if (P.o2 <= 0) hurt(4 * dt);
+  if (st.on) { P.bat.wh = Math.min(P.bat.cap, P.bat.wh + SUIT.rtgW * dt / 3600); if (light.lamp.on) P.bat.wh = Math.max(0, P.bat.wh - SUIT.lampW * dt / 3600); }
+  if (P.o2 < st.o2 * 0.1 && inv.take(S.inv, 'o2 cell', 1) > 0) { P.o2 = Math.min(st.o2, P.o2 + 1); S.say('o2 cell used'); events.emit('used', 'o2 cell'); }
+  if (P.o2 < st.o2 * 0.5 && S.count('oxygen') > 0.01) P.o2 += inv.take(S.inv, 'oxygen', Math.min(st.o2 - P.o2, S.count('oxygen')));
+  if (NEEDS.food < 0.3 && inv.take(S.inv, 'ration', 1) > 0) { NEEDS.food = Math.min(1, NEEDS.food + 0.5); S.say('ate a ration'); events.emit('ate'); }
+  if (NEEDS.water < 0.4 && S.count('water') > 0.2) { const k = inv.take(S.inv, 'water', Math.min(0.5, S.count('water'))); NEEDS.water = Math.min(1, NEEDS.water + k * 0.4); }
   if (P.bat.wh < 25 && inv.take(S.inv, 'power cell', 1) > 0) { P.bat.wh = Math.min(P.bat.cap, P.bat.wh + 400); S.say('power cell used'); events.emit('used', 'power cell'); }
   P.charging = false; for (const m of F.machines) if ((m.kind === 'hub' || m.kind === 'bio-printer') && Math.hypot((m.x + m.w / 2) * TS - P.x, m.y * TS - P.y) < 4) P.charging = true;
-  if (P.charging) { P.bat.wh = Math.min(P.bat.cap, P.bat.wh + 3000 * dt / 3600 * 20); P.o2 = Math.min(SUIT.o2, P.o2 + 0.05 * dt); }
-  const done = printerStep(S.printer, S.inv, dt, P.bat, CARRY - inv.mass(S.inv) + 200);
+  if (P.charging && st.on) { P.bat.wh = Math.min(P.bat.cap, P.bat.wh + 3000 * dt / 3600 * 20); P.o2 = Math.min(st.o2, P.o2 + 0.05 * dt); }
+  // the arm's matter compiler is part of the suit. On the reactor's cable it has its 5 kW; on the suit's own bus it
+  // has 0.4 kW and prints that much slower
+  P.armW = !st.on ? 0 : K.reactor.state === 'carried' || (K.laser.reach && K.laser.state === 'held') || P.charging || P.onCable ? ARM_W : SUIT_BUS_W;
+  const done = st.on ? printerStep(S.printer, S.inv, dt * P.armW / ARM_W, P.bat, st.carry - inv.mass(S.inv) + 200) : null; if (!st.on && S.printer.q.length) S.printer.stall = 'the arm is on the suit';
   if (done) { S.gain(done, 0.0001); audio.play('place'); events.emit('suitPrinted'); if (ITEMS[done].build) events.emit('firstMachinePrinted'); if (S.printer.over) { for (const k in S.printer.over) S.drop(k, S.printer.over[k]); S.printer.over = null; } }
   // hotbar
   if (!ui) { for (let i = 0; i < 9; i++) if (input.hit(String(i + 1))) { P.slot = i; S.plan = null; } if (input.wheel) { P.slot = (P.slot + (input.wheel > 0 ? 1 : 8)) % 9; S.plan = null; } }
-  if (input.hit('l') && !ui) light.lamp.on = !light.lamp.on;
+  if (input.hit('l') && !ui) light.lamp.on = !light.lamp.on; if (!st.on) light.lamp.on = false;
   if (input.hit('c') && !ui) setMode('combat');
   // hands: the laser (kit.js fires it), placing terrain, gathering loose matter, dropping what is held
   const wn = combat ? heldWeapon() : null; P.weapon = wn;
@@ -150,13 +167,18 @@ export function stepPlayer(dt) {
   // left button is the ship laser. The right button lays the selected soil, basalt or plate as ground, unless it is over
   // something it would remove instead. Z drops the selected stack.
   const cur = combat ? null : cursorKind(), gx = Math.floor(S.mouse.x / TS), gy = Math.floor(S.mouse.y / TS);
-  if (!ui && !busy && input.down[0] && hasLaser() && !cur && !S.tool && (!combat || !wn)) P.wantFire = true;
+  const L = K.laser, laserOk = hasLaser() && !L.wait && !L.wrecked && L.frac >= 0.6; P.override = input.key('Shift');
+  if (!ui && !busy && (input.down[0] || P.autoFire) && hasLaser() && !cur && !S.tool && (!combat || !wn) && !(P.autoFire && !input.down[0] && L.sinkJ > 2.0e6)) P.wantFire = true;
+  // round 6 E: in combat mode a hand that has no laser, or a laser that cannot fire (sink full, reactor starved,
+  // standing on its legs), always punches
+  if (!ui && !busy && combat && !wn && ((input.clicked[0] && (!hasLaser() || L.wait || L.wrecked || (L.firing && L.frac < 0.6))) || P.autoPunch)) startPunch();
+  stepPunch(dt); P.autoFire = false; P.autoPunch = false;
   if (!ui && !busy && !combat) {
     const sl = S.inv.slots[P.slot], pm = sl && ITEMS[sl.id].place;
     if (input.down[2] && pm && !S.plan && !thingAt(gx, gy) && Math.hypot(S.mouse.x - P.x, S.mouse.y - P.y - 0.9) < 6) placeMat(sl, pm, dt);
     if (input.hit('z') && sl) { const d = ITEMS[sl.id], n = d.u === 'ea' ? 1 : d.u === 'rd' ? Math.min(sl.n, 30) : Math.min(sl.n, 15 / d.m); S.drop(sl.id, inv.take(S.inv, sl.id, n)); audio.play('thud'); events.emit('dropped'); }
   }
-  if (!ui && !busy && input.key('v')) gather(dt); else P.gatherT = 0;
+  if (!ui && !busy && input.key('v')) gather(dt, st); else P.gatherT = 0;
   if (!ui && combat) {
     const wp = wn && WEAPON[wn];
     if (wp) {
@@ -172,12 +194,52 @@ export function stepPlayer(dt) {
   const hx = P.x + Math.sin(P.rig.lean) * 0.8, hy = P.y + P.rig.py + 0.78;
   light.lamp.x = hx / TS + Math.cos(P.aim) * 0.5; light.lamp.y = hy / TS + Math.sin(P.aim) * 0.5; light.lamp.ang = P.aim; light.lamp.k = (P.hurtT > 0 ? (Math.random() < 0.5 ? 0.2 : 1) : 1) * (P.bat.wh > 0 ? 1 : 0.15);
 }
+// ---- fists (round 6 E) ---------------------------------------------------------------------------------------------------
+// A punch is 0.42 s: wind-up, strike, follow-through, recoil, on the same body (the hand reaches, the torso leans
+// in). It lands once, at the strike: 80 N s through the arm, more with the suit's actuators behind the glove. It knocks
+// back small animals and loose rock, does little to big ones, and costs stamina.
+function startPunch() { if (P.punch || P.exert > 0.97) return; P.punch = { t: 0, T: 0.42 + P.exert * 0.2, hit: false, a: P.aim }; P.exert = Math.min(1, P.exert + FIST.stamina); }
+function stepPunch(dt) {
+  const u = P.punch; if (!u) return; u.t += dt; const k = u.t / u.T, shx = P.x, shy = P.y + 1.36, ca = Math.cos(u.a), sa = Math.sin(u.a), ext = k < 0.3 ? -0.18 * (k / 0.3) : k < 0.5 ? -0.18 + 1.2 * ((k - 0.3) / 0.2) : 1.02 - 0.6 * ((k - 0.5) / 0.5);
+  P.reach = { x: shx + ca * ext, y: shy + sa * ext - 0.1 };
+  if (!u.hit && k >= 0.5) {
+    u.hit = true; const hx = shx + ca * 0.95, hy = shy + sa * 0.95, glove = (P.st && P.st.glove) || 1; let landed = false;
+    for (const c of creatures) { if (c.hp <= 0) continue; const p = hurtPunch(c, hx, hy, Math.sign(ca) || P.face, glove); if (p) { landed = true; P.hitT = 0.2; events.emit('punched', { type: c.type, dv: p.dv, frac: p.frac }); break; } }
+    for (const c of matter.list) { const d = Math.hypot(c.x - hx, c.y - hy); if (d < c.r + 0.35) { const dv = Math.min(FIST.J * glove / c.kg, 12); c.vx += ca * dv; c.vy += sa * dv + 0.5; c.av += rand(-4, 4); c.asleep = false; c.rest = 0; landed = true; } }
+    if (!landed && world.solidAt(hx, hy) && !EXO.on) hurt(1.5);       // a bare fist on rock
+    audio.play(landed ? 'hit' : 'step'); G.shake += landed ? 0.05 : 0; P.vx -= ca * 0.6; S.stats.punches = (S.stats.punches || 0) + 1; events.emit('punch', landed);
+  }
+  if (u.t >= u.T) P.punch = null;
+}
+// ---- the body defends itself (round 6 F) ---------------------------------------------------------------------------------
+// When something attacks it (it has bitten, or it is hunting and within a few metres), and your hand is off the mouse
+// button, the body turns to it, fires the laser if it has one that can fire, punches if not, and steps back to keep
+// its distance and its feet. It stops when the thing is dead or runs. Your input always wins: a mouse button, or the
+// mouse moved. It never starts on an animal that is only wary. S.defend: 'always' | 'combat' | 'off'. Returns the
+// point it aims at, or null.
+const mouse0 = { x: 0, y: 0, t: 9 };
+function defend(dt, ui, busy) {
+  P.autoX = 0; if (Math.abs(input.mx - mouse0.x) + Math.abs(input.my - mouse0.y) > 6) { mouse0.x = input.mx; mouse0.y = input.my; mouse0.t = 0; } else mouse0.t += dt;
+  const mode = S.defend || 'always'; if (mode === 'off' || (mode === 'combat' && S.mode !== 'combat') || ui || busy || NEEDS.asleep > 0 && false) { P.def = null; return null; }
+  let best = null, bs = 0; for (const c of creatures) { if (c.hp <= 0) continue; const d = Math.hypot(c.x - P.x, c.y - P.y - 0.9), bit = S.attacker === c && G.time - (S.attackT || -99) < 8; if (!(bit || (c.agg && (c.state === 'charge' || d < 3.2) && d < 9))) continue; const sc = (bit ? 20 : 0) + 10 / (1 + d) + (KIND[c.type].bite || 2) * 0.2; if (sc > bs) { bs = sc; best = c; } }
+  P.def = best; if (!best) return null;
+  const manual = input.down[0] || input.down[2] || mouse0.t < 0.7; if (manual) return null;
+  const d = Math.hypot(best.x - P.x, best.y - P.y - 0.9), L = K.laser;
+  if (hasLaser() && !L.wait && !L.wrecked && L.reach && (d > 1.1 || L.frac >= 0.6)) P.autoFire = Math.abs(angDiff(Math.atan2(best.y - (P.y + 1.36), best.x - P.x), P.wa)) < 0.16;
+  else if (d < 1.5 && S.mode === 'combat' || d < 1.2) P.autoPunch = true;
+  if (S.mode !== 'combat' && P.autoPunch) { S.mode = 'combat'; S.plan = null; }       // fists up
+  const keyX = (input.key('d') ? 1 : 0) - (input.key('a') ? 1 : 0);
+  if (!keyX && P.ground) { if (d < 0.9 && hasLaser()) P.autoX = Math.sign(P.x - best.x) || 1; else if (d > 1.3 && d < 3 && !hasLaser()) P.autoX = Math.sign(best.x - P.x); }       // keep the distance the weapon wants
+  // the suit reacts by itself: the lamp flares in their eyes, and three of them on you is a jet hop out of the grab
+  if (EXO.on) { let on = 0; for (const c of creatures) if (c.agg && c.hp > 0 && Math.hypot(c.x - P.x, c.y - P.y - 0.9) < 1.1) on++; if (on >= 3 && P.ground && P.prop > 0.4 && P.mob.jet > 9 && !(P.hopT > G.time)) { P.hopT = G.time + 4; P.vy = Math.max(P.vy, 5.5); P.vx += (Math.sign(P.x - best.x) || 1) * 4; P.autoJet = 0.5; S.scare = 1; events.emit('suitHop'); } if (d < 4 && light.lamp.on) S.scare = Math.max(S.scare || 0, 0.6); }
+  return { x: best.x, y: best.y };
+}
 // hold V: the hands take loose matter within reach into the suit, as fast as hands can, as much as the suit carries
-function gather(dt) {
+function gather(dt, st) {
   const c = matter.near(P.x + P.face * 0.3, P.y + 0.5, SUIT.reach, q => !q.claim); if (!c) { P.gatherT = 0; return; }
   P.reach = { x: c.x, y: c.y }; if (c.temp > 0.7) { if (S.msgT <= 0) S.say('too hot to carry yet', 1.2); return; }
-  const d = ITEMS[c.id]; P.gatherT += dt; let n = d.u === 'ea' ? (P.gatherT > 0.45 ? 1 : 0) : Math.min(c.n, SUIT.gather * dt / d.m); if (!n) return; if (d.u === 'ea') P.gatherT = 0;
-  const left = S.add(c.id, n), got = n - left; if (got > 1e-9) { matter.take(c, got); S.gain(c.id, got); P.exert = Math.min(1, P.exert + dt * 0.15); if (Math.random() < dt * 6) audio.play('step'); events.emit('gathered', c.id); } else if (S.msgT <= 0) S.say('the suit carries no more', 1.5);
+  const d = ITEMS[c.id]; P.gatherT += dt; let n = d.u === 'ea' ? (P.gatherT > 0.45 ? 1 : 0) : Math.min(c.n, SUIT.gather * (st && st.on ? 1 : 0.3) * dt / d.m); if (!n) return; if (d.u === 'ea') P.gatherT = 0;
+  const left = S.add(c.id, n), got = n - left; if (got > 1e-9) { matter.take(c, got); S.gain(c.id, got); P.exert = Math.min(1, P.exert + dt * 0.15); if (Math.random() < dt * 6) audio.play('step'); events.emit('gathered', c.id); } else if (S.msgT <= 0) S.say(st && st.on ? 'the suit carries no more' : 'you can carry no more: about 60 kg, and 25 already slows you', 1.5);
 }
 // the body: feet that step on real ground, a sprung pelvis, a torso that leans, a heavy weapon that follows late
 function stepRig(dt, mob, ax) {
@@ -262,14 +324,15 @@ export function drawPlayer(b, time) {
     else b.seg(bl.x, bl.y, bl.x - dx / l * len, bl.y - dy / l * len, bl.tr ? 0.045 : 0.03, bl.tr ? [5, 2.6, 0.8] : [1.2, 0.9, 0.5], bl.tr ? 1 : 0.5, 2, 2); }
   if (S.corpse) { b.add(S.corpse.x, S.corpse.y + 0.14, 1.5, 0.3, 0.05, C.suit, 1, 2, 1); b.add(S.corpse.x + 0.5, S.corpse.y + 0.2, 0.3, 0.3, 0, mul(C.amber, 1.5 + Math.sin(time * 4)), 0.8, 1, 2); }
   if (P.dead > 0) return;
-  const g = P.rig, f = P.face, lean = g.lean, sl = Math.sin(lean), cl = Math.cos(lean), suit = C.suit, br = Math.sin(g.breath), hot = P.hurtT > 0 ? 1.6 : 1;
+  // without the exosuit it is a person: thinner limbs, cloth, no pack, no helmet, a mask over the face
+  const g = P.rig, f = P.face, lean = g.lean, sl = Math.sin(lean), cl = Math.cos(lean), bare = !EXO.on, W = bare ? 0.68 : 1, suit = bare ? [0.115, 0.1, 0.09] : C.suit, br = Math.sin(g.breath), hot = P.hurtT > 0 ? 1.6 : 1;
   const stf = g.f[0].t >= 0 ? g.f[1] : g.f[1].t >= 0 ? g.f[0] : null, hipX = P.x + sl * 0.04 + (stf && P.ground ? clamp((stf.x - P.x) * 0.14, -0.06, 0.06) : 0), hipY = P.y + g.py,      // the weight goes over the standing foot
         chX = hipX + sl * 0.52, chY = hipY + cl * 0.52 + br * 0.008, hdX = chX + Math.sin(lean * 0.6) * 0.3 + f * 0.02, hdY = chY + Math.cos(lean * 0.6) * 0.28, mvd = Math.abs(P.vx) > 0.3 ? Math.sign(P.vx) : f;
   const leg = (i, shade) => { const f0 = g.f[i], fdx = f0.x - hipX, fdy = f0.y + 0.07 - hipY + 0.04, fd = Math.hypot(fdx, fdy), fk = fd > 0.9 ? 0.9 / fd : 1, ft = { x: hipX + fdx * fk, y: hipY - 0.04 + fdy * fk - 0.07, t: f0.t }, ax = ft.x - mvd * 0.03, ay = ft.y + 0.07, kn = ik2(hipX, hipY - 0.04, ax, ay, THIGH, SHIN, mvd), c = mul(suit, shade * hot), sw = ft.t >= 0 ? Math.sin(Math.min(1, ft.t) * Math.PI) : 0;
-    b.seg(hipX, hipY - 0.04, kn[0], kn[1], 0.21, c, 1, 2, 1, i, 0.2, 0, 0.5); b.seg(kn[0], kn[1], ax, ay, 0.17, c, 1, 2, 1, i + 2, 0.22, 0, 0.5); b.add(kn[0] + mvd * 0.03, kn[1], 0.15, 0.13, 0, mul(C.steel, shade * 0.9), 1, 2, 1);        // thigh, shin, knee plate
+    b.seg(hipX, hipY - 0.04, kn[0], kn[1], 0.21 * W, c, 1, 2, 1, i, 0.2, 0, 0.5); b.seg(kn[0], kn[1], ax, ay, 0.17 * W, c, 1, 2, 1, i + 2, 0.22, 0, 0.5); if (!bare) b.add(kn[0] + mvd * 0.03, kn[1], 0.15, 0.13, 0, mul(C.steel, shade * 0.9), 1, 2, 1);        // thigh, shin, knee plate
     b.add(ft.x + mvd * 0.06, ft.y + 0.055, 0.32, 0.13, -mvd * sw * 0.5 + (P.ground ? 0 : -mvd * 0.3), mul(C.dark, 1.3 * shade), 1, 2, 1, 0, 0, 0, 0.4); };
-  const arm = (sx, sy, hx, hy, shade, metal, bend) => { let dx = hx - sx, dy = hy - sy; const d = Math.hypot(dx, dy); if (d > 0.62) { hx = sx + dx / d * 0.62; hy = sy + dy / d * 0.62; } const e = ik2(sx, sy, hx, hy, 0.32, 0.32, bend), c = metal ? mul(C.steel, 1.1 * shade) : mul(suit, shade * hot);
-    b.seg(sx, sy, e[0], e[1], 0.14, c, 1, 2, 1, 5, 0.15, 0, 0.5); b.seg(e[0], e[1], hx, hy, 0.115, c, 1, 2, 1, 6, 0.15, 0, 0.5); b.add(hx, hy, 0.1, 0.1, 0, mul(C.dark, 1.6), 1, 2, 1); if (metal) { b.add(e[0], e[1], 0.1, 0.1, 0, C.dark, 1, 2, 1); b.add(lerp(e[0], hx, 0.7), lerp(e[1], hy, 0.7), 0.05, 0.05, 0, mul(C.cyan, S.printer.q.length ? 2.5 + Math.sin(time * 11) : 0.7), 1, 1, 2); } return [hx, hy]; };
+  const arm = (sx, sy, hx, hy, shade, metal, bend) => { let dx = hx - sx, dy = hy - sy; const d = Math.hypot(dx, dy); if (d > 0.62) { hx = sx + dx / d * 0.62; hy = sy + dy / d * 0.62; } metal = metal && !bare; const e = ik2(sx, sy, hx, hy, 0.32, 0.32, bend), c = metal ? mul(C.steel, 1.1 * shade) : mul(suit, shade * hot);
+    b.seg(sx, sy, e[0], e[1], 0.14 * W, c, 1, 2, 1, 5, 0.15, 0, 0.5); b.seg(e[0], e[1], hx, hy, 0.115 * W, c, 1, 2, 1, 6, 0.15, 0, 0.5); b.add(hx, hy, 0.1, 0.1, 0, mul(C.dark, 1.6), 1, 2, 1); if (metal) { b.add(e[0], e[1], 0.1, 0.1, 0, C.dark, 1, 2, 1); b.add(lerp(e[0], hx, 0.7), lerp(e[1], hy, 0.7), 0.05, 0.05, 0, mul(C.cyan, S.printer.q.length ? 2.5 + Math.sin(time * 11) : 0.7), 1, 1, 2); } return [hx, hy]; };
   const item = hasLaser() ? 'laser' : S.mode === 'combat' && P.weapon ? P.weapon : null, ca = Math.cos(P.wa), sa = Math.sin(P.wa), shX = chX - f * 0.02, shY = chY - 0.02;
   const far = g.f[0].t >= 0 || (g.f[1].t < 0 && (g.f[0].x - P.x) * f < (g.f[1].x - P.x) * f) ? 0 : 1;     // draw the trailing leg first
   leg(far, 0.58);
@@ -279,15 +342,17 @@ export function drawPlayer(b, time) {
   else arm(shX + f * 0.04, shY, shX + f * 0.04 + swing, shY - 0.56 + Math.abs(swing) * 0.12, 0.6, false, -f);
   // back: the reactor on its frame, or the life-support pack
   if (hasReactor()) { const bx = chX - f * 0.36 - sl * 0.1, by = chY - 0.16 + br * 0.006; b.seg(chX - f * 0.1, chY + 0.12, bx, by + 0.3, 0.05, C.dark, 1, 2, 1); b.seg(hipX - f * 0.1, hipY + 0.05, bx, by - 0.3, 0.05, C.dark, 1, 2, 1); drawReactor(b, bx, by, lean - f * 0.06, time, K.reactor.load); }
-  else { b.add(chX - f * 0.24, chY - 0.12, 0.24, 0.5, lean, mul(C.steel, 0.8), 1, 0, 1, 3, 0, 0, 0.4); b.add(chX - f * 0.3, chY + 0.04, 0.05, 0.05, 0, mul(C.amber, 2.5), 1, 1, 2); }
-  b.seg(hipX, hipY, chX, chY, 0.37 + br * 0.012, mul(suit, hot), 1, 2, 1, 1, 0, 0, 0.55);                               // torso
-  b.add(lerp(hipX, chX, 0.2), lerp(hipY, chY, 0.2), 0.36, 0.1, lean, mul(C.dark, 1.4), 1, 2, 1);                        // belt
-  b.add(chX + f * 0.1, chY - 0.02, 0.17, 0.26, lean, mul(C.steel, 0.62), 1, 0, 1, 2);                                    // chest unit
+  else if (!bare) { b.add(chX - f * 0.24, chY - 0.12, 0.24, 0.5, lean, mul(C.steel, 0.8), 1, 0, 1, 3, 0, 0, 0.4); b.add(chX - f * 0.3, chY + 0.04, 0.05, 0.05, 0, mul(C.amber, 2.5), 1, 1, 2); }
+  b.seg(hipX, hipY, chX, chY, (0.37 + br * 0.012) * (bare ? 0.76 : 1), mul(suit, hot), 1, 2, 1, 1, 0, 0, 0.55);                               // torso
+  if (!bare) { b.add(lerp(hipX, chX, 0.2), lerp(hipY, chY, 0.2), 0.36, 0.1, lean, mul(C.dark, 1.4), 1, 2, 1);                        // belt
+  b.add(chX + f * 0.1, chY - 0.02, 0.17, 0.26, lean, mul(C.steel, 0.62), 1, 0, 1, 2); }                                    // chest unit
   if (hasReactor()) b.seg(chX + f * 0.12, chY + 0.16, chX - f * 0.14, chY - 0.3, 0.05, C.dark, 1, 2, 1);                // strap
   leg(1 - far, 1);
+  if (bare) { b.add(hdX, hdY + 0.05, 0.24, 0.27, lean * 0.4, mul([0.2, 0.15, 0.12], hot), 1, 2, 1, 0, 0, 0, 0.6); b.add(hdX - f * 0.02, hdY + 0.14, 0.25, 0.12, lean * 0.4, [0.03, 0.028, 0.026], 1, 2, 1); if (!P.inAir) { b.add(hdX + f * 0.09, hdY + 0.0, 0.12, 0.12, 0, mul(C.steel, 0.8), 1, 2, 1); b.seg(hdX + f * 0.06, hdY - 0.04, chX - f * 0.08, chY, 0.025, C.dark, 1, 2, 1); } }       // a head, hair, and the mask with its hose when the air is bad
+  else {
   b.add(hdX, hdY + 0.06, 0.35, 0.37, lean * 0.4, mul(suit, 1.25 * hot), 1, 2, 1, 0, 0, 0, 0.7);                          // helmet
   b.add(hdX - f * 0.06, hdY - 0.1, 0.3, 0.09, lean * 0.4, mul(C.dark, 1.5), 1, 2, 1);                                    // collar ring
-  b.add(hdX + f * 0.1 + Math.cos(P.aim) * 0.012, hdY + 0.07 + g.head * 0.03, 0.16, 0.14, g.head * 0.3 * f, mul(S.mode === 'combat' ? C.red : C.amber, 0.5), 1, 2, 2);   // visor
+  b.add(hdX + f * 0.1 + Math.cos(P.aim) * 0.012, hdY + 0.07 + g.head * 0.03, 0.16, 0.14, g.head * 0.3 * f, mul(S.mode === 'combat' ? C.red : C.amber, 0.5), 1, 2, 2); }   // visor
   if (light.lamp.on) b.add(hdX + f * 0.14, hdY + 0.2, 0.07, 0.07, 0, mul(C.warm, 3 * light.lamp.k), 1, 1, 2);
   // what the hands hold
   if (item === 'laser') drawLaser(b, P.gx, P.gy, P.wa, time, K.laser.heat, K.laser.firing && K.laser.frac >= 0.6);

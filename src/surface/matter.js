@@ -15,12 +15,12 @@
 //              add up to the parent's exactly
 // The field is polar (x along the ground, y up), so gravity is -y here and radial on the planet.
 import { rand, hash } from '../core.js';
-import { ITEMS } from '../items.js';
+import { ITEMS, inv } from '../items.js';
 import { world, GRAV, SLAB, TS } from './world.js';
 import { light } from './light.js';
 import { heat } from './heat.js';
 import { S, C, mul } from './state.js';
-const RHO = { soil: 1500, basalt: 2900, 'iron ore': 5000, 'copper ore': 4200, lumen: 2100, iron: 7800, copper: 8900, biomass: 600, fibre: 400, chitin: 1200, 'xeno shard': 3400 }, nv = [0, 0];
+const RHO = { rubble: 2900, 'lean ore': 3600, slag: 2800, silicon: 2300, soil: 1500, basalt: 2900, 'iron ore': 5000, 'copper ore': 4200, lumen: 2100, iron: 7800, copper: 8900, biomass: 600, fibre: 400, chitin: 1200, 'xeno shard': 3400 }, nv = [0, 0];
 const ORG = { biomass: 1, fibre: 1, resin: 1, ichor: 1, chitin: 1 };
 export const ROCK = { fric: 0.65, rest: 0.18, slop: 0.012, iters: 8, vmax: 40, sleepV: 0.15, sleepT: 0.4, minPiece: 1.5, fracV: 5.5 };
 export const kgOf = (id, n) => n * ITEMS[id].m;
@@ -95,10 +95,11 @@ export const matter = {
     if (!(n > 1e-9) || !ITEMS[id]) return null; const kg = kgOf(id, n), uid = this.nextId++;
     for (let i = 0; i < 3; i++) { const d = world.dens(x, y); if (d <= 0) break; if (world.normal(x, y, nv) < 0.05) { nv[0] = 0; nv[1] = 1; } x += nv[0] * (d + 0.06); y += nv[1] * (d + 0.06); }      // nothing is born inside the ground
     const c = { uid, id, n, kg, x, y, vx, vy, av: rand(-3, 3), rot: (hash(uid, 3, 913) - 0.5) * 3, temp, rest: 0, asleep: false, seed: hash(uid, 7, 912) * 100, claim: null, dumped: false, lv: new Float64Array(16), wv: new Float64Array(16), wn: new Float64Array(16), touch: 0, hit: 0, deep: 0, ax: x, ay: y, ar: 0, still: 0 };
+    if (id === 'rubble') { c.q = { ...(inv.nextQ || inv.lastQ || { fe: 0.09, cu: 0.00006, lm: 0, host: 2 }) }; inv.nextQ = null; }       // rock nobody has assayed carries what it really is (geology.js)
     shapeNew(c, uid); fit(c); this.list.push(c); this.made += kg; return c;
   },
   // take up to n out of a body; returns the amount taken. The body is removed when it is empty.
-  take(c, n) { const k = Math.min(n, c.n); c.n -= k; c.kg = kgOf(c.id, c.n); this.taken += kgOf(c.id, k); if (c.n <= 1e-9) { const i = this.list.indexOf(c); if (i >= 0) this.list.splice(i, 1); c.gone = true; } else fit(c); this.wake(c.x, c.y, c.br + 1); return k; },
+  take(c, n) { const k = Math.min(n, c.n); if (c.q) inv.lastQ = c.q; c.n -= k; c.kg = kgOf(c.id, c.n); this.taken += kgOf(c.id, k); if (c.n <= 1e-9) { const i = this.list.indexOf(c); if (i >= 0) this.list.splice(i, 1); c.gone = true; } else fit(c); this.wake(c.x, c.y, c.br + 1); return k; },
   // what rested on something that is gone has to fall
   wake(x, y, r) { for (const o of this.list) if (o.asleep && Math.abs(o.x - x) < r + o.br && Math.abs(o.y - y) < r + o.br) { o.asleep = false; o.rest = 0; o.casc = 1; } },
   wakeBox(x0, y0, x1, y1) { for (const o of this.list) if (o.asleep && o.x > x0 - o.br - 0.3 && o.x < x1 + o.br + 0.3 && o.y > y0 - o.br - 0.3 && o.y < y1 + o.br + 0.3) { o.asleep = false; o.rest = 0; o.casc = 1; } },
@@ -113,7 +114,7 @@ export const matter = {
     let left = c.n; const i0 = this.list.indexOf(c); if (i0 >= 0) this.list.splice(i0, 1); c.gone = true; this.made -= c.kg;
     for (let i = 0; i < k; i++) {
       const f = cuts[i + 1] - cuts[i], n = i === k - 1 ? left : c.n * f, mid = ((cuts[i] + cuts[i + 1]) - 1) * L; left -= n;
-      const p = this.spawn(c.id, n, c.x + ax * mid, c.y + ay * mid, 0, 0, c.temp); if (!p) continue;
+      if (c.q) inv.nextQ = c.q; const p = this.spawn(c.id, n, c.x + ax * mid, c.y + ay * mid, 0, 0, c.temp); if (!p) continue; p.zone = c.zone;
       // each piece keeps the parent's outer corners and gets fresh ones where the break ran
       const pl = f * L, h = j => 0.12 + hash(p.uid, j, 922) * 0.3, o = c.cut, sc = v => Math.min(0.7, v * Math.min(L, T) / Math.min(pl, T));
       p.asp = along ? pl / T : T / pl; p.cut = along ? [i === k - 1 ? sc(o[0]) : h(0), i === 0 ? sc(o[1]) : h(1), i === 0 ? sc(o[2]) : h(2), i === k - 1 ? sc(o[3]) : h(3)] : [i === k - 1 ? sc(o[0]) : h(0), i === k - 1 ? sc(o[1]) : h(1), i === 0 ? sc(o[2]) : h(2), i === 0 ? sc(o[3]) : h(3)];
@@ -216,12 +217,12 @@ export const matter = {
     }
   },
   // a body is saved with its pose and its shape, so a pile comes back as the pile it was
-  dump() { const f = v => +v.toFixed(3); return this.list.map(c => [c.id, +c.n.toFixed(5), f(c.x), f(c.y), c.dumped ? 1 : 0, f(c.rot), f(c.asp), c.cut.map(f)]); },
+  dump() { const f = v => +v.toFixed(3); return this.list.map(c => { const o = [c.id, +c.n.toFixed(5), f(c.x), f(c.y), c.dumped ? 1 : 0, f(c.rot), f(c.asp), c.cut.map(f)]; if (c.q || c.zone) o.push(c.q ? [+c.q.fe.toFixed(4), +c.q.cu.toFixed(5), +c.q.lm.toFixed(5), c.q.host, c.q.ox === undefined ? null : f(c.q.ox), c.q.oy === undefined ? null : f(c.q.oy)] : 0, c.zone || 0); return o; }); },
   load(a) {
     this.list.length = 0; this.made = this.taken = 0; this.nextId = 1;
-    for (const q of a || []) { const c = this.spawn(q[0], q[1], q[2], q[3]); if (!c) continue; c.dumped = !!q[4]; c.av = 0; if (q[7]) { c.rot = q[5]; c.asp = q[6]; c.cut = q[7].slice(); } else c.rot = 0; fit(c); c.asleep = true; c.wasRest = 1; c.chk = 1; }      // a version 4 body had no shape: it gets one from its place in the list
+    for (const q of a || []) { if (!ITEMS[q[0]]) continue; if (q[8]) inv.nextQ = { fe: q[8][0], cu: q[8][1], lm: q[8][2], host: q[8][3], ...(q[8][4] === null || q[8][4] === undefined ? {} : { ox: q[8][4], oy: q[8][5] }) }; const c = this.spawn(q[0], q[1], q[2], q[3]); if (!c) continue; c.dumped = !!q[4]; if (q[9]) c.zone = q[9]; c.av = 0; if (q[7]) { c.rot = q[5]; c.asp = q[6]; c.cut = q[7].slice(); } else c.rot = 0; fit(c); c.asleep = true; c.wasRest = 1; c.chk = 1; }      // a version 4 body had no shape: it gets one from its place in the list
   },
 };
-world.onEdit = (x0, y0, x1, y1) => { if (matter.list.length) matter.wakeBox(x0, y0, x1, y1); };
+world.onEdit = (x0, y0, x1, y1) => { if (matter.list.length) matter.wakeBox(x0, y0, x1, y1); if (world.onEdit2) world.onEdit2(x0, y0, x1, y1); };
 // hot loose rock warms the ground it lies on a little, so a fresh spoil heap glows
 export function matterHeat(dt) { for (const c of matter.list) if (c.temp > 0.5 && Math.random() < dt * 2) heat.add(c.x, c.y - c.r, 0.35, 0.05); }

@@ -1,15 +1,16 @@
 // tools/play.mjs: the game played by hand, from a fresh default start, in headless Chromium (software GL). Every action
 // is a real key or mouse event through puppeteer; the script only reads state to know where to aim and when to stop,
 // and steps game time itself between inputs (software GL draws about one frame a second, so waiting in real time would
-// take an hour). It checks what round 5 is about:
-//   1 a fall from 30 m and one at terminal velocity (60 m/s) end standing on the ground, never in it or through it
-//   2 the laser cuts the outcrop and a pit; the back wall shows behind both; the rock that falls lies still within 12 s
-//   3 basalt gathered by hand, a furnace crafted into the inventory (E), placed from its slot: the item is gone, the furnace stands
-//   4 decks crafted and laid over the pit: you stand on one, S drops you through, a 20 m fall lands on it
-//   5 Tab: blueprint mode. A chest you do not hold goes down as a ghost; the ship AI has it made and a drone builds it
-//   6 the drones fetch loose ore and deliver it to the hold, and the fabricator turns it into iron for the stock target
-// Set-up that is not play, and says so where it happens: the lift to the height before each fall (with a body that
-// survives the landing), and a hive that sleeps with creatures that do not bite.
+// take an hour). Round 6: it plays the new start, with the forest and the hive as they are (nothing is switched off):
+//   1 you wake inside the wreck without the suit: no instruments, no robots, a slow body that cannot move the reactor
+//   2 you find the exosuit in its locker and put it on; the boot brings the one AI up and releases the robots
+//   3 the ship laser and the reactor come out of the wreck (now the suit can lift them)
+//   4 the first scan (hold H): the outcrop is known within the scanner's range, and it cost data
+//   5 a kerf through the outcrop (K, the reactor set down for its coolant line): the block it cuts loose falls out
+//   6 the first craft from stock in reach: a furnace ordered from rock that lies loose; robots fetch it, the fabricator
+//     makes it, a robot brings it, and it is placed. Not one robot gives a job up.
+//   7 a mining order: a pit cut by hand, a drift marked from it (Tab, T); the drones cut it, the AI plans the support
+//     itself, has a steel set made and a drone sets it
 // usage: npm run build && node tools/play.mjs [--url http://localhost:5233/]     exits 1 on any failed check or console error
 import http from 'node:http'; import fs from 'node:fs'; import path from 'node:path'; import puppeteer from 'puppeteer-core'; import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), dist = path.join(root, 'dist'), port = 5234, MIME = { '.html': 'text/html', '.js': 'text/javascript' };
@@ -48,105 +49,69 @@ const uiClick = async (sel, opt = {}) => { await settle(); const p = await box(s
 const slotKey = async id => { const i = await ev(`D.S.inv.slots.findIndex(s => s && s.id === ${JSON.stringify(id)})`); if (i < 0 || i > 8) return false; await press(String(i + 1)); return true; };
 try {
   await page.goto(U + '?act=surface&seed=7', { waitUntil: 'load', timeout: 120000 }); await page.waitForFunction('window.__ready === true', { timeout: 120000 }); await still(true);
-  // set-up: this run is about the six things, not about surviving. The hive sleeps and nothing that lives bites (a fall,
-  // molten rock and lava still hurt), so a wave drawn by two minutes of cutting cannot end the run half way.
-  await ev(`(D.hive.quiet = true, D.S.hurt = () => {}, 1)`);
-  await ev(`(D.EV = {}, D.events.on('*', (n, d) => { D.EV[n] = (D.EV[n] || 0) + 1; if (n === 'robotDelivered') (D.EVD = D.EVD || []).push([d.item, +(d.n || 0).toFixed(1), d.to]); if (n === 'robotGaveUp') (D.EVG = D.EVG || []).push(d); if (n === 'died') (D.DIED = D.DIED || []).push({ t: +dev.G.time.toFixed(1), at: [+D.P.x.toFixed(1), +D.P.y.toFixed(1)], heat: +D.heat.at(D.P.x, D.P.y - 0.1).toFixed(2), o2: +D.P.o2.toFixed(2), vy: +D.P.vy.toFixed(1) }); }), 1)`);
-  const start = await ev(`[D.S.mode, D.K.laser.state, D.K.reactor.state, D.S.inv.slots.filter(Boolean).map(s => s.id).join(), D.robots.length]`);
-  check('fresh default start: normal mode, nothing in the hands', start[0] === 'build' && start[1] === 'ship' && start[2] === 'ship' && start[4] === 0, start);
-  const shown = () => page.$$eval('#win [data-a="print"]', els => els.map(e => e.dataset.i)), makeable = () => ev('D.RECIPES.filter(D.canSee).map(r => r.id)');
-  await press('e'); const menu0 = await shown(); await press('e');
-  check('at the start the crafting menu shows what iron and copper make, and no furnace, hub or cell', menu0.includes('chest') && menu0.includes('belt') && menu0.includes('platform') && !menu0.includes('furnace') && !menu0.includes('hub') && !menu0.includes('power cell') && !menu0.includes('o2 cell'), menu0);
-
-  // 1 falling. The lift to the height is the set-up (and a body that survives the landing); the fall is the game's own.
-  const fall = async (h, label) => {
-    await ev(`(D.P.hp = 1e9, D.P.y += ${h}, D.P.vy = 0, D.P.vx = 0, D.FALL = { v: 0, deep: 0 }, 1)`); let t = 0, st;
-    [t, st] = await ev(`(() => { const P = D.P; let t = 0, st; for (; t < 40; t += 1 / 120) { dev.step(1); D.FALL.v = Math.max(D.FALL.v, -P.vy); D.FALL.deep = Math.max(D.FALL.deep, D.bodyDepth()); st = [P.ground, +P.y.toFixed(3), +D.FALL.v.toFixed(1), +D.FALL.deep.toFixed(3), +D.world.dens(P.x, P.y - 0.12).toFixed(3), !!P.onDeck]; if (st[0] && t > 0.3) break; } return [t, st]; })()`);
-    await ev('(D.P.hp = 100, D.P.stumble = 0, 1)'); await step(1.5); const end = await ev(`[D.P.ground, +D.bodyDepth().toFixed(3), +D.world.dens(D.P.x, D.P.y - 0.12).toFixed(3), +D.P.y.toFixed(2), !!D.P.onDeck]`);
-    return { label, top: st[2], deepest: st[3], t: +t.toFixed(2), end };
-  };
-  const f1 = await fall(30, '30 m'); check('a 30 m fall ends standing on the ground', f1.end[0] && f1.deepest < 0.16 && f1.end[1] < 0.03 && f1.end[2] > 0, f1);
-  const f2 = await fall(420, 'terminal velocity'); check('a fall at terminal velocity (60 m/s) does not go through the ground', f2.top >= 59.9 && f2.end[0] && f2.deepest < 0.16 && f2.end[1] < 0.03 && f2.end[2] > 0, f2);
-
-  // the kit, with the keys the hints name: F unbolts the laser, F pulls the reactor, F opens the hold
-  await walkTo(await ev('D.SHIP.mount[0] + 1.9')); await press('f'); check('f unbolts the ship laser', (await until(`D.K.laser.state === 'held'`, 10)) >= 0);
-  await walkTo(await ev('D.SHIP.bay[0] + 1.2')); await press('f'); check('f pulls the reactor', (await until(`D.K.reactor.state === 'carried'`, 10)) >= 0, await ev('Math.round(D.P.load)'));
-  await walkTo(await ev('D.SHIP.hatch[0] + 0.8')); await press('f'); await until('D.S.uiOpen', 3); await settle();
-  const ironSlot = await ev(`D.K.hold.slots.findIndex(s => s && s.id === 'iron')`); await uiClick(`#win .slot[data-c="c"][data-i="${ironSlot}"]`, { shift: true });
-  check('the hold opens with f and iron moves to the suit with shift-click', (await ev(`D.S.count('iron')`)) === 14, await ev(`D.S.inv.slots.filter(Boolean).map(s => s.id + ' ' + s.n).join()`));
-  await press('e'); check('e closes the window', (await ev('D.S.uiOpen')) === false);
-
-  // the antenna frame by the wreck already has its kit: stand by it and the suit builds it; the network comes up
-  await walkTo(2.6); const ant = await until(`D.F.machines.some(m => m.kind === 'antenna') && D.robots.length >= 2`, 30); check('the antenna gets built and the ship robots wake', ant >= 0, { s: ant, robots: await ev('D.robots.length') });
-
-  // 2 cutting: the outcrop east of the wreck, then a pit in the ground beside it
-  await walkTo(6.2); const wall0 = await ev(`[D.world.solidAt(12.2, 1.4), D.world.wallAt(12.2, 1.4)]`);
-  // the way a hand does it: the button held, the cursor swept over the rock
-  const sweep = async (pts, each) => { await aim(pts[0][0], pts[0][1]); await page.mouse.down(); await step(0.2); if (process.env.PLAYDEBUG) console.log('  fire', JSON.stringify(await ev(`[D.input.down.join(), D.P.wantFire, D.S.uiOpen, !!D.P.act, D.cursorKind(), D.S.tool, D.S.mode, D.K.laser.state, D.K.reactor.state, D.K.laser.firing, D.K.laser.frac, D.K.laser.vent, D.K.laser.reach, D.P.dead, D.ui.open, D.P.slot]`))); let t = 0; for (const [x, y] of pts) { await aim(x, y); await step(each); t += each + 1; } await page.mouse.up(); await step(0.1); return t; };
-  const cutT = await sweep([[11.2, 1.4], [12.2, 1.4], [13.2, 1.6], [12.6, 0.8], [11.6, 0.6], [12.2, 2.2], [13.4, 0.9], [14.2, 0.6], [12.2, 1.4]], 1.6);
-  await walkTo(0.4); const pitT = await sweep([[-1.5, -0.3], [-1.5, -0.9], [-1.9, -0.5], [-1.1, -0.5], [-1.5, -1.4], [-2.1, -0.3], [-0.9, -0.3], [-1.5, -0.8]], 1.2);
-  const cut = await ev(`({ dug: Math.round(D.S.stats.dug), outcrop: [D.world.solidAt(12.2, 1.4), D.world.wallAt(12.2, 1.4)], pit: [D.world.solidAt(-1.5, -0.8), D.world.wallAt(-1.5, -0.8)], bodies: D.matter.list.length, loose: Math.round(D.matter.total()) })`);
-  check('the laser cuts the outcrop and a pit, and rock falls out', cut.dug > 300 && cut.bodies > 8 && wall0[0] === true, { cutT, pitT, ...cut });
-  check('the back wall stays behind what was cut (outcrop and pit)', cut.outcrop[0] === false && cut.outcrop[1] === true && cut.pit[0] === false && cut.pit[1] === true, cut);
-  await settle(); await shot('cut');
-  // still: every body asleep, or awake only because a robot has just lifted its neighbour off the pile (awake, and not moving)
-  const rest = await until('D.matter.list.every(c => c.asleep || (Math.hypot(c.vx, c.vy) < 0.2 && Math.abs(c.av) < 1))', 12, 0.25), pile = await ev(`({ bodies: D.matter.list.length, awake: D.matter.awake, moving: D.matter.list.filter(c => !c.asleep && Math.hypot(c.vx, c.vy) >= 0.2).length, inRock: D.matter.list.filter(c => D.world.dens(c.x, c.y) > 0.08).length, which: D.matter.list.filter(c => D.world.dens(c.x, c.y) > 0.08).map(c => [c.id, +c.kg.toFixed(2), +c.hw.toFixed(2), +c.hh.toFixed(2), +c.x.toFixed(2), +c.y.toFixed(2), +D.world.dens(c.x, c.y).toFixed(2), +D.world.dens(c.x, c.y + c.hh).toFixed(2), +D.world.dens(c.x, c.y - c.hh).toFixed(2), +c.temp.toFixed(2)].join(' ')), breaks: D.matter.breaks, spin: +Math.max(0, ...D.matter.list.map(c => Math.abs(c.av))).toFixed(3) })`);
-  check('the fallen rock lies still within 12 s of the last cut', rest >= 0 && pile.inRock === 0 && pile.moving === 0 && pile.spin < 1, { s: rest, ...pile });
-
-  // 3 a furnace: gather 40 kg of basalt by hand (V), craft it (E, click), place it from its slot. First the cut cools:
-  // molten ground burns and hot rock cannot be carried.
-  const hottest = `Math.max(...Array.from({ length: 45 }, (q, i) => { const x = 4.5 + i * 0.25, g = D.world.groundY(x, 4, 0, 8); return g === null ? 0 : D.heat.at(x, g - 0.1); }))`;
-  const cool = await until(`${hottest} < 0.5`, 120, 1);
-  const seen0 = await ev(`D.unlocked('furnace')`);
-  for (let i = 0; i < 30 && (await ev(`D.S.count('basalt')`)) < 40; i++) {
-    const c = await ev(`(() => { let b = null, bd = 1e9; for (const c of D.matter.list) if (c.id === 'basalt' && c.kg > 3 && c.temp < 0.6 && !c.claim && c.x > 5 && c.y < 1.2 && D.heat.at(c.x, c.y - c.r) < 0.5) { const d = Math.abs(c.x - D.P.x); if (d < bd) { bd = d; b = c; } } return b ? [b.x, b.y] : null; })()`);
-    if (!c) { await walkTo(6.2); await sweep([[13.2, 0.9], [14.0, 1.4], [12.4, 0.5]], 1.2); await step(25); continue; }
-    await walkTo(c[0] - 0.3, 0.35); await aim(c[0] + 0.6, c[1] + 0.2); await page.keyboard.down('v'); await step(2.5); await page.keyboard.up('v'); await step(0.05);
-    if (process.env.PLAYDEBUG) console.log('  gather', JSON.stringify(await ev(`[+dev.G.time.toFixed(1), Math.round(D.P.hp), +D.P.x.toFixed(2), +D.P.y.toFixed(2), +D.heat.at(D.P.x, D.P.y - 0.1).toFixed(2), D.P.ground, +D.S.count('basalt').toFixed(1), D.creatures.filter(q => q.agg).length, D.S.msg]`)), JSON.stringify(c));
-  }
-  const byHand = await ev(`D.S.count('basalt')`);
-  if (byHand < 40) {       // the drones were quicker: what they carried is in the hold, and the hold is a chest
-    await walkTo(await ev('D.SHIP.hatch[0] + 0.8')); await press('f'); const bs = await ev(`D.K.hold.slots.findIndex(s => s && s.id === 'basalt')`); if (bs >= 0) await uiClick(`#win .slot[data-c="c"][data-i="${bs}"]`, { shift: true }); if (await ev('D.S.uiOpen')) await press('e');
-  }
-  const bas = await ev(`D.S.count('basalt')`); check('basalt gathered by hand with v' + (byHand < 40 ? ' and taken from the hold' : ''), bas >= 40 && byHand > 1, { byHand: +byHand.toFixed(1), cooled: cool, deaths: await ev('D.DIED || []'), basalt: +bas.toFixed(1), hp: await ev('Math.round(D.P.hp)'), died: await ev('D.EV.died || 0'), unlockedBefore: seen0, unlockedNow: await ev(`D.unlocked('furnace')`) });
-  await press('e'); await until('D.S.uiOpen', 3); await settle();
-  const menu = await shown(), can = await makeable();
-  check('the crafting menu now shows the furnace, and exactly the recipes whose inputs have been seen', menu.includes('furnace') && menu.join() === can.join() && menu.length > menu0.length, { menu, known: await ev('[...D.S.known].sort()') });
-  await uiClick('#win [data-a="print"][data-i="furnace"]'); const q1 = await ev(`[D.S.printer.q.map(j => j.r).join(), +D.S.count('basalt').toFixed(1)]`);
-  await uiClick('#win [data-a="print"][data-i="platform"]'); await shot('craft'); await press('e');
-  const crafted = await until(`D.S.count('furnace') >= 1 && D.S.count('platform') >= 4`, 90, 0.5); check('the arm crafts a furnace and four decks into the inventory', crafted >= 0 && q1[0] === 'furnace', { s: crafted, queued: q1, inv: await ev(`D.S.inv.slots.filter(Boolean).map(s => s.id + ' ' + +s.n.toFixed(1)).join()`) });
-  await walkTo(4.2); check('the furnace is in a hotbar slot and a number key selects it', await slotKey('furnace') && (await ev('D.cursorKind()')) === 'furnace');
-  const fx = await ev(`(() => { for (let gx = 11; gx > -2; gx--) if (D.tryPlace && D.F.machines.every(m => gx + 2 <= m.x || gx >= m.x + m.w) && !D.world.solidAt((gx + 1) * D.TS, 0.3) && D.world.solidAt((gx + 0.5) * D.TS, -0.3) && D.world.solidAt((gx + 1.5) * D.TS, -0.3) && Math.abs((gx + 1) * D.TS - D.P.x) < 5 && Math.abs((gx + 1) * D.TS - D.P.x) > 1.2 && !D.BP.ghosts.some(g => g.x < gx + 2 && g.x + 2 > gx)) return gx; return null; })()`);
-  await aim((fx + 0.75) * 0.5, 0.25); await settle(); await shot('furnace-cursor'); await click();
-  const placed = await ev(`[D.F.machines.filter(m => m.kind === 'furnace').length, D.S.count('furnace'), D.BP.ghosts.length, D.cursorKind()]`);
-  check('placing the furnace from the inventory puts it down and consumes the item', placed[0] === 1 && placed[1] === 0, { cell: fx, placed });
-  await click(); await settle(); const again = await ev(`[D.F.machines.filter(m => m.kind === 'furnace').length + D.BP.ghosts.length, D.S.uiOpen, D.S.open && D.S.open.kind]`);
-  check('a second click places nothing (there is no second furnace); the empty hand opens the furnace it clicked', again[0] === 1 && again[1] === true && again[2] === 'furnace', again); if (again[1]) await press('e');
-
-  // 4 decks over the pit: stand on one, drop through with S, fall onto one from 20 m
-  const pit = await ev(`(() => { const T = D.TS, open = gx => [-0.7, -0.25, 0.3, 1].every(y => D.world.dens((gx + 0.5) * T, y) < 0); let best = [], run = []; for (let gx = -9; gx < 4; gx++) { if (open(gx)) { run.push(gx); if (run.length > best.length) best = run.slice(); } else run = []; } return best; })()`);
-  const span = pit.slice(0, 4); await slotKey('platform');
-  await walkTo((span[span.length - 1] + 1) * 0.5 + 1.1); for (const gx of span) { await aim((gx + 0.5) * 0.5, -0.25); await click(); }
-  const decks = await ev(`[D.PL.cells.size, D.S.count('platform')]`); check('decks are laid from the inventory over the pit', decks[0] === span.length && decks[1] === 4 - span.length, { span, decks });
-  await press('q'); const mid = (span[0] + span.length / 2) * 0.5; await walkTo(mid, 0.12); await step(0.6);
-  const on = await ev(`[!!D.P.onDeck, D.P.ground, +D.P.y.toFixed(3), D.world.dens(D.P.x, D.P.y - 0.3) < 0]`); check('you stand on a deck with air under it', on[0] && on[1] && Math.abs(on[2]) < 0.01 && on[3], on); await settle(); await shot('deck');
-  await page.keyboard.down('s'); await step(0.25); await page.keyboard.up('s'); const landed = await until('D.P.ground && !D.P.onDeck', 6, 0.1);
-  const under = await ev(`[!!D.P.onDeck, D.P.ground, +D.P.y.toFixed(2), +D.bodyDepth().toFixed(3)]`); check('s drops you through the deck onto the rock below', !under[0] && under[2] < -0.05 && under[3] < 0.03 && landed >= 0, [...under, landed]); await shot('under');
-  await ev(`(D.P.x = ${mid}, D.P.y = 0.02, D.P.vx = 0, D.P.vy = 0, 1)`); const f3 = await fall(20, 'onto the deck'); check('a 20 m fall lands on the deck, not through it', f3.end[0] && f3.end[4] && Math.abs(f3.end[3]) < 0.01, f3);
-
-  // 5 blueprint mode: Tab, pick a chest you do not hold, click: a ghost, and the ship AI builds it
-  await press('Tab'); await settle(); const row = await page.$$eval('#plan [data-a="plan"]', els => els.map(e => e.dataset.i));
-  check('tab turns blueprint mode on and its row lists only what can be made yet', (await ev('D.S.mode')) === 'blueprint' && row.includes('chest') && row.includes('furnace') && row.join() === (await ev('D.plannable()')).join() && row.every(k => k === 'wall' || can.includes(k) || true), row);
-  await uiClick('#plan [data-a="plan"][data-i="chest"]'); const cx = await ev(`(() => { for (let gx = 6; gx > -6; gx--) if (D.F.machines.every(m => gx + 2 <= m.x || gx >= m.x + m.w) && !D.world.solidAt((gx + 1) * D.TS, 0.3) && D.world.solidAt((gx + 0.5) * D.TS, -0.3) && D.world.solidAt((gx + 1.5) * D.TS, -0.3)) return gx; return null; })()`);
-  await walkTo((cx + 1) * 0.5 + 3); await aim((cx + 0.75) * 0.5, 0.25); await click(); await settle(); await shot('ghost');
-  const gh = await ev(`[D.BP.ghosts.map(g => g.kind + (g.have ? '+kit' : '')).join(), D.S.count('chest'), D.F.machines.filter(m => m.kind === 'chest').length, D.S.plan]`); check('a chest you do not hold goes down as a ghost', gh[0] === 'chest' && gh[1] === 0 && gh[2] === 0, gh);
-  await press('Tab'); check('tab leaves blueprint mode', (await ev('D.S.mode')) === 'build');
-  const built = await until(`D.F.machines.some(m => m.kind === 'chest')`, 150, 0.5); check('the ship ai has the chest made and a drone builds it', built >= 0 && (await ev('D.EV.robotBuilt || 0')) >= 1, { s: built, robotBuilt: await ev('D.EV.robotBuilt || 0'), fabDone: await ev('D.EV.fabDone || 0'), queue: await ev(`D.queueView(D.robots).map(q => q.kind + ': ' + q.why)`) });
-
-  // 6 the drones: loose ore goes to the hold, and the fabricator makes iron of it for the stock target
-  const del = await until(`(D.EVD || []).some(d => d[0] === 'iron ore' && d[2] === 'inv') && (D.EV.fabDone || 0) >= 2`, 180, 0.5);
-  const haul = await ev(`({ delivered: (D.EVD || []).length, ore: (D.EVD || []).filter(d => d[0] === 'iron ore').slice(0, 4), gave: (D.EVG || []).slice(0, 6), loaded: D.EV.robotLoaded || 0, gaveUp: D.EV.robotGaveUp || 0, fabDone: D.EV.fabDone || 0, holdOre: +D.inv.count(D.K.hold, 'iron ore').toFixed(1), iron: +((D.SUP.stock || {}).iron || 0).toFixed(1), robots: D.robots.map(r => r.kind + ' ' + D.intentOf(r)), looseOre: (() => { const L = D.matter.list.filter(c => c.id === 'iron ore'), t = dev.G.time; return { n: L.length, kg: Math.round(L.reduce((a, c) => a + c.kg, 0)), claimed: L.filter(c => c.claim).length, skipped: L.filter(c => c.skip > t).length, noDrone: L.filter(c => c.noDrone > t).length, hot: L.filter(c => c.temp > 0.7).length, unlinked: L.filter(c => !D.isLinked(c.x, c.y)).length }; })(), holdRoom: D.holdRoom('iron ore'), full: !!D.SUP.full, orders: D.SUP.orders.map(o => o.item + ' by ' + o.producer + ': ' + o.note) })`);
-  check('drones fetch loose ore, deliver it to the hold, and the fabricator crafts from it', del >= 0, { s: del, ...haul });
+  await ev(`(D.EV = {}, D.EVG = [], D.EVD = [], D.events.on('*', (n, d) => { D.EV[n] = (D.EV[n] || 0) + 1; if (n === 'robotDelivered') D.EVD.push([d.item, +(d.n || 0).toFixed(1), d.to, d.by]); if (n === 'robotGaveUp') D.EVG.push(d); if (n === 'collapse') (D.EVC = D.EVC || []).push([+d.x.toFixed(1), +d.y.toFixed(1), +d.span.toFixed(1), +d.kg.toFixed(0)]); if (n === 'died') (D.DIED = D.DIED || []).push({ t: +dev.G.time.toFixed(1), at: [+D.P.x.toFixed(1), +D.P.y.toFixed(1)], hp: D.P.hp }); }), 1)`);
+  const EVN = n => ev(`D.EV[${JSON.stringify(n)}] || 0`);
+  // 1 awake in the wreck, without the suit
+  const s0 = await ev(`({ inside: D.WRECK.inside, suit: D.EXO.on, boot: D.BOOT.done, robots: D.robots.length, laser: D.K.laser.state, reactor: D.K.reactor.state, stage: D.S.stage, quiet: !!D.hive.quiet, creatures: D.creatures.length, inv: D.S.inv.slots.filter(Boolean).length, next: D.nextSteps().map(q => q.do) })`);
+  check('you wake inside the wreck without the suit: no robots, nothing in the hands, the hive and the forest as they are', s0.inside && !s0.suit && !s0.boot && s0.robots === 0 && s0.laser === 'ship' && s0.reactor === 'ship' && s0.stage === 1 && !s0.quiet && s0.creatures > 0 && s0.inv === 0 && /exosuit/.test(s0.next[0]), s0);
+  await step(2.6); await shot('wake');
+  await press('e'); const menu0 = await page.$$eval('#win [data-a="print"]', els => els.length), noArm = await page.$eval('#win', e => /matter compiler is in the arm/i.test(e.textContent)); await press('e');
+  check('without the suit there is nothing to craft with, and no ai window', menu0 === 0 && noArm && !(await (async () => { await press('j'); const o = await ev('D.ui.open'); if (o) await press('Escape'); return o; })()), { recipes: menu0 });
+  // a weak body: how fast it walks, and the reactor it cannot move
+  const bayX = await ev('D.SHIP.bay[0]'); await page.keyboard.down('a'); await step(1.2); const vBare = Math.abs(await ev('D.P.vx')); await page.keyboard.up('a'); await step(0.3);
+  await walkTo(bayX + 0.4, 0.4); await press('f'); await step(3); const s1 = await ev(`({ reactor: D.K.reactor.state, msg: D.S.msg, speed: D.P.mob.speed, jet: D.P.mob.jet, carry: D.S.carry })`);
+  check('the bare body is slow and weak: it cannot move the 140 kg reactor', vBare > 1.5 && vBare < 3.2 && s1.reactor === 'ship' && /exosuit/.test(s1.msg) && s1.jet === 0 && s1.carry === 60, { v: +vBare.toFixed(2), ...s1 });
+  // 2 the suit, and the boot
+  const lockX = await ev(`D.toWorld(D.partNamed('suit locker').lx, 0)[0]`); await walkTo(lockX + 0.1, 0.3); const hint = await ev(`D.wreckHint ? '' : ''`);
+  await press('f'); const tSuit = await until('D.EXO.on', 8, 0.1); await step(2.9); await shot('boot'); const mid = await ev('({ t: D.BOOT.t, shown: D.BOOT.shown, done: D.BOOT.done })');
+  const tBoot = await until('D.BOOT.done', 12, 0.1); await step(1.5);
+  const s2 = await ev(`({ robots: D.robots.map(r => r.kind), awake: D.K.awake, lamp: D.light.lamp.on, link: !!D.K.net.player, mast: D.K.net.antennas[0].range, stage: D.S.stage, ant: D.F.machines.length + D.BP.ghosts.length, str: D.P.st.body.str, id: D.EXO.id, known: [...D.S.known] })`);
+  check('the suit is found in its locker and put on; the boot comes up line by line', tSuit >= 0 && mid.shown >= 3 && !mid.done && tBoot >= 0, { tSuit, mid, tBoot });
+  check('the one ai is up: the drones and the hauler are released at once, on the ship\'s own antenna, with no antenna built', s2.robots.length === 3 && s2.robots.includes('crawler') && s2.awake && s2.link && s2.mast >= 1000 && s2.ant === 0 && s2.lamp && s2.stage === 2 && s2.str === 300, s2);
+  await press('e'); const menu1 = await page.$$eval('#win [data-a="print"]', els => els.map(e => e.dataset.i)), reachTxt = await page.$eval('#reach', e => e.textContent); await shot('reach'); await press('e');
+  check('the menus show what can be done now and nothing from later: no launch pad, no bio-printer; the hold is in reach', menu1.length >= 6 && !menu1.includes('pad') && !menu1.includes('bio-printer') && menu1.includes('chest') && /hold/.test(reachTxt) && /iron/.test(reachTxt), { menu: menu1, reach: reachTxt.slice(0, 160) });
+  // 3 out through the torn tail, the laser, the reactor
+  const doorX = await ev('D.toWorld(D.HULL.door, 0)[0]'); await walkTo(doorX + 0.3, 0.4); await press('w'); await step(0.4); const out = !(await ev('D.WRECK.inside'));
+  const mountX = await ev('D.SHIP.mount[0]'); await walkTo(mountX + 1.8, 0.4); await press('f'); const tL = await until('D.K.laser.state === "held"', 6, 0.1);
+  await walkTo(bayX + 1.5, 0.4); await press('f'); const tR = await until('D.K.reactor.state === "carried"', 6, 0.1); await step(0.5); const load = await ev('D.P.load');
+  check('w steps out of the wreck; the suit unbolts the laser and pulls the reactor', out && tL >= 0 && tR >= 0 && load > 170, { out, tL, tR, load: +load.toFixed(0) });
+  // 4 the first scan
+  await walkTo(8.9, 0.4); await aim(12.3, 1.5); const gb0 = await ev('D.FOG.usedGB'), est0 = await ev('(() => { const e = D.estimate(D.world.matAt(12.3, 1.5), 12.3, 1.5, 0); return [e.lo, e.hi]; })()');
+  await page.keyboard.down('h'); const tScan = await until('D.GEO.scans >= 1', 8, 0.05); await step(0.2); await shot('scan'); await aim(13.5, 2.3); const tScan2 = await until('D.GEO.scans >= 2', 8, 0.05); await page.keyboard.up('h'); await step(0.3);
+  const sc = await ev('(() => { const x = 12.3, y = 1.5, m = D.world.matAt(x, y), q = D.composition(m, x, y), e = D.estimate(m, x, y, D.levelAt(x, y)); return { level: D.levelAt(x, y), truth: q.fe, lo: e.lo, hi: e.hi, gb: D.FOG.usedGB, finds: D.FOG.finds.size, cap: D.FOG.capGB }; })()');
+  check('the first scan (hold h): the rock is known within the scanner\'s range, narrower than the guess, and it cost data', tScan >= 0 && tScan2 >= 0 && sc.level === 1 && sc.truth >= sc.lo && sc.truth <= sc.hi && sc.hi - sc.lo < est0[1] - est0[0] && sc.gb > gb0 + 5 && sc.finds > 4, { tScan, ...sc, guess: est0 });
+  // 5 the kerf: the reactor set down (its coolant line), the laser in kerf mode, slots through the shoulder of the outcrop
+  await walkTo(9.3, 0.3); await press('x'); await until('D.K.reactor.state === "ground"', 4, 0.1); await press('k'); const mode = await ev('D.K.laser.mode');
+  // the way a block is quarried: an undercut from the ground into the foot of the outcrop, then up onto it (the jet lifts you
+  // with the laser alone; the reactor stays down) and a second slot from the top to meet the first. What they cut off falls.
+  let cuts = 0; await aim(12.5, 0.35); await step(0.6); let p0 = await ev('D.K.laser.pulses'); await page.mouse.down(); await until(`D.K.laser.pulses >= ${p0 + 40}`, 14, 0.05); await page.mouse.up(); await step(0.6); cuts++; await shot('kerf');
+  await page.keyboard.down(' '); const tJet = await until('D.P.y > 4.2', 8, 0.05), dbg = await ev('[D.P.x, D.P.y, D.P.prop, D.P.ground, D.P.load, D.P.mob.jet, D.input.keys.has(" "), !!D.P.act, D.S.uiOpen, D.S.mode, [...D.input.keys]]'); console.log('JET', tJet, JSON.stringify(dbg)); await page.keyboard.down('d'); const t1 = await until('D.P.x > 10.5', 5, 0.05), d1 = await ev('[D.P.x, D.P.y, D.P.vx, D.P.vy]'); await page.keyboard.up('d'); await page.keyboard.down('a'); const t2 = await until('D.P.vx < 0.6', 2, 0.05), d2 = await ev('[D.P.x, D.P.y, D.P.vx, D.P.vy]'); await page.keyboard.up('a'); await page.keyboard.up(' '); const t3 = await until('D.P.ground', 6, 0.05), d3 = await ev('[D.P.x, D.P.y, D.P.vx, D.P.vy]'); await step(1); for (let i = 0; i < 40 && (await ev('D.P.x')) > 13.1; i++) { await page.keyboard.down('a'); await step(0.12); await page.keyboard.up('a'); await step(0.35); } await step(0.8);       // short steps along the top: it is a narrow place to stand
+  const top = await ev('[D.P.x, D.P.y, D.P.ground, D.K.laser.reach]'); const f0 = await ev('D.MINE.freed');
+  for (const off of [0.95, 1.25, 0.75]) { if ((await ev('D.MINE.freed')) > f0 + 15) break; await aim(top[0] - off, top[1] - 1.1); await step(0.6); p0 = await ev('D.K.laser.pulses'); await page.mouse.down(); await until(`D.MINE.freed > ${f0 + 15} || D.K.laser.pulses >= ${p0 + 42}`, 14, 0.05); await page.mouse.up(); await step(1.5); cuts++; }
+  await step(4); const kf = await ev(`({ freed: D.MINE.freed, pulses: D.K.laser.pulses, kerfs: D.MINE.kerfs.length, loose: D.matter.list.filter(c => c.id === 'basalt' || c.id === 'lean ore' || c.id === 'iron ore').reduce((a, c) => a + c.kg, 0), rubble: D.matter.total('rubble'), pieces: D.matter.list.filter(c => c.kg > 3).length, heat: D.K.laser.heat, loop: D.K.laser.loop, hp: D.P.hp, ks: D.MINE.kerfs.map(k => [+k.x0.toFixed(2), +k.y0.toFixed(2), +Math.atan2(k.dy, k.dx).toFixed(2), +k.len.toFixed(2)]), at: [+D.P.x.toFixed(2), +D.P.gx.toFixed(2), +D.P.gy.toFixed(2)] })`);
+  check('k switches the laser to kerf; an undercut and a slot from the top cut a block loose, and it falls out as rock that is known', mode === 'kerf' && kf.freed >= 40 && kf.loose >= 30 && kf.pieces >= 3 && top[2] && top[3], { cuts, top, ...kf }); await shot('blocks');
+  if (process.env.PLAY_STOP === 'kerf') throw new Error('stopped after the kerf');
+  await press('k');
+  // 6 the first craft from stock in reach
+  await walkTo(6.5, 0.5); await step(1.5); await press('e'); const inReach = await page.$eval('#reach', e => e.textContent), had = await page.$$eval('#win [data-a="print"][data-i="furnace"]', e => e.length); await shot('craft');
+  const clicked = await uiClick('#win [data-a="print"][data-i="furnace"]'); const ordered = await ev('D.SUP.wanted.map(w => w.item)'); await press('e');
+  check('the furnace can be crafted from rock that lies in reach, not in the hands: it is ordered from the network', /loose/.test(inReach) && had === 1 && clicked && ordered.includes('furnace') && (await ev('D.S.count("basalt")')) < 1, { ordered, reach: inReach.slice(0, 200) });
+  const tGot = await until('D.S.count("furnace") >= 1 || D.SUP.wanted.length === 0', 420, 0.5); const got = await ev(`({ furnace: D.S.count('furnace'), fabDone: D.EV.fabDone || 0, delivered: D.EVD.slice(0, 12), toYou: D.EVD.filter(d => d[2] === 'player'), gave: D.EVG, retries: D.MARKET.retries, log: D.LOG.lines.slice(-8).map(l => l.t), orders: D.SUP.orders.map(o => [o.item, o.producer, o.note]), hp: D.P.hp })`);
+  check('robots fetch the rock, the fabricator makes the furnace, a robot brings it', tGot >= 0 && got.furnace >= 1 && got.fabDone >= 1 && got.delivered.some(d => d[0] === 'basalt') && got.toYou.some(d => d[0] === 'furnace'), { s: tGot, ...got });
+  check('a robot fetch with zero give-ups', got.gave.length === 0 && got.delivered.length >= 2, { gave: got.gave, retries: got.retries });
+  const okSlot = await slotKey('furnace'); await aim(4.6, 0.25); await click(); await step(0.5); const placed = await ev(`({ furnace: D.F.machines.filter(m => m.kind === 'furnace').length, left: D.S.count('furnace'), msg: D.S.msg, cur: D.cursorKind(), slot: D.P.slot, mode: D.S.mode, ghosts: D.BP.ghosts.map(g => g.kind), at: [D.P.x, D.S.mouse.x, D.S.mouse.y] })`);
+  check('the furnace is placed from its slot', okSlot && placed.furnace === 1 && placed.left === 0, placed); await shot('furnace');
+  // 7 a mining order with supports: an access pit by hand, a drift marked from it, the drones cut it and the ai props it
+  await walkTo(16.2, 0.4); const g17 = await ev('D.world.groundY(17.7, 3, 0, 8)');
+  for (const dy of [-0.2, -0.8, -1.4, -2.0, -2.5]) { await aim(17.7, g17 + dy); await page.mouse.down(); await until(`!D.world.solidAt(17.7, ${g17 + dy - 0.15})`, 14, 0.05); await page.mouse.up(); await step(0.3); }
+  await step(1); const pit = await ev(`[D.world.solidAt(17.7, ${g17 - 1.8}), D.world.solidAt(17.7, ${g17 - 3.6})]`);
+  await press('Tab'); await press('t'); const gy1 = Math.floor((g17 - 1.1) / 0.5), gy0 = gy1 - 1;
+  await aim(18.3, (gy0 + 0.5) * 0.5); await page.mouse.down(); await step(0.1); await aim(19.2, (gy1 + 0.5) * 0.5); await page.mouse.up(); await step(0.3); const ord = await ev('D.BP.clears.map(c => [c.x0, c.y0, c.x1, c.y1])'); await shot('order'); await press('Tab');
+  check('a mining order: a pit cut by hand, a drift marked from it in blueprint mode', !pit[0] && pit[1] && ord.length === 1 && ord[0][2] - ord[0][0] >= 1.5, { pit, ord, collapses: await ev('D.EVC || []') });
+  await walkTo(14.2, 0.5); const tSup = await until('D.MINE.supports.length >= 1', 900, 1), sup = await ev(`({ supports: D.MINE.supports.map(s => [s.kind, s.x, s.y0, s.y1]), planned: D.EV.supportPlanned || 0, built: D.EV.supportBuilt || 0, collapses: D.EVC || [], spans: [...D.MINE.spans.values()].map(s => [+s.span.toFixed(1), +s.safe.toFixed(1)]), clears: D.BP.clears.length, gave: D.EVG, cut: D.EV.robotCleared || 0, log: D.LOG.lines.slice(-8).map(l => l.t), ghosts: D.BP.ghosts.map(g => g.kind), hp: D.P.hp, robots: D.robots.map(r => D.intentOf(r)) })`);
+  check('the drones cut the drift; the ai planned its support by itself, had it made, and a drone set it', tSup >= 0 && sup.supports.length >= 1 && sup.planned >= 1 && sup.built >= 1, { s: tSup, ...sup }); await aim(19.2, g17 - 1.2); await shot('supports');
+  const end = await ev(`({ gave: D.EVG, retries: D.MARKET.retries, deaths: D.DIED || [], hp: D.P.hp, time: +dev.G.time.toFixed(0), stage: D.S.stage, creatures: D.creatures.length, quiet: !!D.hive.quiet, kills: D.S.stats.kills, zones: D.STOCK.zones.map(z => [z.name, +D.zoneKg(z).toFixed(0)]), suit: +D.EXO.cond.toFixed(3), hive: [D.hive.alert, D.hive.waves, D.hive.level, D.EV.hiveProbe || 0, D.EV.hiveWave || 0, D.EV.probeReturned || 0], pulses: D.K.laser.pulses })`);
+  check('to the end: no robot gave a job up, nobody died, and nothing that lives was switched off', end.gave.length === 0 && end.deaths.length === 0 && !end.quiet && end.hp > 0, end);
   await settle(); await shot('end');
 } catch (e) { fails.push('threw: ' + e.message); console.log('THREW', e.stack); try { await shot('threw'); } catch (e2) { /* the page is gone */ } }
 check('no console errors', errs.length === 0, errs.slice(0, 5));

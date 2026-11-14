@@ -95,7 +95,7 @@ function redist(i0, j0, i1, j1) {
 }
 
 export const world = {
-  chunks, rev: 0, backWall: false,
+  chunks, rev: 0, backWall: false, rawRate: false, lastSign: 0,       // rawRate: the caller's rate is metres, whatever the rock (the laser's energy sets it)
   reset() { chunks.clear(); lastKey = NaN; last = null; this.rev++; },
   // signed density in metres at a point, bilinear; positive inside rock
   dens(x, y) {
@@ -135,7 +135,7 @@ export const world = {
     const i0 = Math.floor(x0 / CELL) - 1, i1 = Math.ceil(x1 / CELL) + 1, j0 = Math.floor(y0 / CELL) - 1, j1 = Math.ceil(y1 / CELL) + 1; let changed = 0;
     for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
       const c = chunk(i >> 6, j >> 6), q = ((j & 63) << 6) | (i & 63), old = c.d[q], mm = c.m[q] & 127, sd = sdf(i * CELL, j * CELL); let nv;
-      if (sign < 0) { const tg = 128 + sd * 254; if (tg >= old || (deny && deny(mm))) continue; nv = rate ? Math.max(tg, old - rate * 254 / MAT[mm].hard) : tg; }
+      if (sign < 0) { const tg = 128 + sd * 254; if (tg >= old || (deny && deny(mm))) continue; nv = rate ? Math.max(tg, old - rate * 254 / (this.rawRate ? 1 : MAT[mm].hard)) : tg; }
       else { const tg = 128 - sd * 254; if (tg <= old) continue; nv = rate ? Math.min(tg, old + rate * 254) : tg; }
       nv = clamp(Math.round(nv), 0, 255); if (nv === old) continue;
       const c0 = cov(old), c1 = cov(nv);
@@ -144,7 +144,7 @@ export const world = {
       if (sign > 0 && this.backWall && nv > 128) c.m[q] |= WALL;       // rock laid down as part of the world has the back wall behind it, like the rock that was always there
       c.d[q] = nv; c.mod = true; changed++;
     }
-    if (changed) { redist(i0, j0, i1, j1); this.rev++; if (this.onEdit) this.onEdit(x0, y0, x1, y1); } return changed;
+    this.lastSign = sign; if (changed) { redist(i0, j0, i1, j1); this.rev++; if (this.onEdit) this.onEdit(x0, y0, x1, y1); } return changed;
   },
   dig(x, y, r, rate, acc, deny) { return this.shape(x - r, y - r, x + r, y + r, circle(x, y, r), -1, 0, rate, acc, deny); },
   fill(x, y, r, mat, rate, acc) { return this.shape(x - r, y - r, x + r, y + r, circle(x, y, r), 1, mat, rate, acc); },

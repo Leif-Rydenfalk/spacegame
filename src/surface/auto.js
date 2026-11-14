@@ -1,4 +1,4 @@
-// the ship AI as a planner. The player places things; this decides how they get built and how everything moves.
+// the AI as a planner. The player places things; this decides how they get built and how everything moves.
 //   queue    every ghost is an order. Priority is what helps the base expand first (network and robots, then mining,
 //            smelting, assembly, storage, belts, the rest), then the order the player placed them; the player can move
 //            any order up or down by hand (the AI window, J).
@@ -12,22 +12,25 @@
 //   power    machines draw from the base grid: the wreck's auxiliary bus, and the reactor when it is in its bay or set
 //            down (or carried) within reach of the grid. Loads are served in the same priority; a starved machine slows.
 import { events } from '../core.js';
-import { RECIPES, RECIPE, ITEMS, massOf } from '../items.js';
+import { RECIPES, RECIPE, ITEMS, massOf, recipeFor } from '../items.js';
 import { TS } from './world.js';
 import { S, C, mul } from './state.js';
 import { F, DEFS, canPlace, machineAt, LUMP } from './factory.js';
 import { BP, addGhost, costOf } from './blueprint.js';
 import { K, SHIP, reactorPos, isLinked } from './kit.js';
 import { powerBudget, REACTOR_W } from './power.js';
+import { wireLoss } from './physics.js';
 import { hive } from './hive.js';
 import { creatures } from './creatures.js';
 
-export const RANK = { antenna: 0, hub: 0, miner: 1, furnace: 2, assembler: 3, chest: 4, belt: 5, platform: 5, 'bio-printer': 6, pad: 7, wall: 8 };
-export const WATT = { belt: 40, miner: 3000, furnace: 1500, assembler: 2000, hub: 300, antenna: 60, 'bio-printer': 500, pad: 200, chest: 0 };
+export const RANK = { 'steel set': -2, 'rock bolt': -2, 'power pole': 0, 'assay station': 1, 'shaft rig': 1, pump: 2, 'air filter': 2, controller: 2, camera: 4, radar: 4, stairs: 5, seat: 7, table: 7, bunk: 7, antenna: 0, hub: 0, miner: 1, furnace: 2, assembler: 3, chest: 4, belt: 5, platform: 5, 'bio-printer': 6, pad: 7, wall: 8 };
+// round 6: real power. An arc furnace is 150 kW, the assembler's compiler 40 kW; the wreck's own bus is 4 kW, so a
+// furnace runs on the reactor (2 MW in its bay or set down) or not at all.
+export const WATT = { belt: 40, miner: 12000, furnace: 150000, assembler: 40000, hub: 300, antenna: 60, 'bio-printer': 500, pad: 200, chest: 0, 'assay station': 6000, 'shaft rig': 30000, pump: 800, 'air filter': 120, controller: 20, camera: 8, radar: 150, 'power pole': 0 };
 export const AUX_W = 4000, GRID_R = 26, BELT_MAX = 44;      // the wreck's own bus; how far a grid node reaches; the longest belt the AI will lay
-export const BOT = { cargo: 60, vEmpty: 8, vFull: 4.4, handle: 4, flyW: 70 };   // the numbers the route model uses for a drone
+export const BOT = { cargo: 15, vEmpty: 9, vFull: 3.1, handle: 4, flyW: 1700 };   // a drone with a full load (physics.js): 15 kg at 3 m/s   // the numbers the route model uses for a drone
 export const PORT = { x: Math.floor((SHIP.x + 3.5) / TS), y: 0 };                 // the hold's intake: a belt that ends here feeds the ship hold
-export const AUTO = { routes: [], power: { supply: 0, demand: 0, used: 0, note: '' }, status: {}, short: {}, tick: 0, on: true, laid: 0 };
+export const AUTO = { routes: [], links: [], power: { supply: 0, demand: 0, used: 0, note: '' }, status: {}, short: {}, tick: 0, on: true, laid: 0 };
 
 // ---- the queue -----------------------------------------------------------------------------------------------------
 export const queueKey = g => g.key !== undefined && g.key !== null ? g.key : (RANK[g.kind] ?? 9) * 100000 + g.id;
@@ -45,6 +48,8 @@ export function bump(g, dir) {
 // the producer for a recipe: its own machine if one stands; else the wreck's fabricator, which works straight from the
 // hold ('ship' is in kinds while the wreck is there); else the arm on the suit
 const producerOf = (r, kinds) => kinds.has(r.by) ? r.by : kinds.has('ship') ? 'ship' : 'suit';
+// round 6: when the caller can ask the producers themselves (kinds.pick), the one that would be done soonest wins
+const pick = (r, kinds) => { if (!kinds.pick) return { who: producerOf(r, kinds) }; return kinds.pick(r); };
 // pure. stock, targets, pending = { item: amount }; builds = [{ id, item, n }] in queue order; kinds = Set of machine
 // kinds that stand. Returns { orders: [{ item, need, recipe, producer, batches, inputs, pri, why }] in priority order,
 // short: { raw item: amount nobody has }, status: { build id: 'stock' | 'make' | 'short:<item>' } }
@@ -52,10 +57,11 @@ export function planAll(stock, targets, builds, pending, kinds) {
   const avail = { ...stock }, real = { ...stock }, orders = new Map(), short = {}, status = {}; for (const k in pending) avail[k] = (avail[k] || 0) + pending[k];
   const want = (item, n, pri, why, depth) => {
     const have = Math.min(Math.max(avail[item] || 0, 0), n); avail[item] = (avail[item] || 0) - have; const need = n - have; if (need <= 1e-9) return null;
-    const r = RECIPES.find(q => item in q.out);
+    // the recipe: the first whose inputs somebody has (rich ore, lean ore, any rock), else the first; by-products are never ordered for themselves
+    const r = recipeFor(item, k => stock[k] || 0);
     if (!r || depth > 4) { short[item] = (short[item] || 0) + need; return item; }
     const batches = Math.ceil(need / r.out[item] - 1e-9); avail[item] += batches * r.out[item] - need;
-    let o = orders.get(item); if (!o) orders.set(item, o = { item, need: 0, recipe: r.id, producer: producerOf(r, kinds), batches: 0, inputs: {}, pri, why });
+    let o = orders.get(item); if (!o) { const pk = pick(r, kinds); orders.set(item, o = { item, need: 0, recipe: r.id, producer: pk.who, bids: pk.bids, batches: 0, inputs: {}, pri, why }); }
     o.need += need; o.batches += batches; let block = null;
     for (const k in r.in) { const q = r.in[k] * batches; o.inputs[k] = (o.inputs[k] || 0) + q; const b = want(k, q, pri, why, depth + 1); if (b && !block) block = b; }
     return block;
@@ -83,7 +89,7 @@ export function chooseRoute(q) {
   if (q.powerFree !== undefined && q.powerFree < cells * WATT.belt) return out('robot', `robots: the grid has no ${(cells * WATT.belt / 1000).toFixed(1)} kw to spare for a belt`);
   if (!(q.robots > 0)) return out('belt', `belt: no robot is free; ${say}`);
   if (share > 0.3) return out('belt', `belt: ${say} would take ${(Math.min(share, 9.99) * 100).toFixed(0)}% of the robots (${trip.toFixed(0)} s a trip)`);
-  if (dist <= 10 && q.rate > 0.12) return out('belt', `belt: ${cells} cells is cheaper than flying ${say} for good`);
+  if (dist <= 10 && q.rate > 0.05) return out('belt', `belt: ${cells} cells is cheaper than flying ${say} for good`);
   return out('robot', `robots: ${say} is ${(share * 100).toFixed(0)}% of what they carry (${trip.toFixed(0)} s a trip); a belt of ${cells} cells is not worth it`);
 }
 const mid = m => [(m.x + m.w / 2) * TS, (m.y + m.h / 2) * TS];
@@ -91,12 +97,12 @@ const mid = m => [(m.x + m.w / 2) * TS, (m.y + m.h / 2) * TS];
 export function rateOf(m) {
   const pw = m.pw === undefined ? 1 : m.pw;
   if (m.kind === 'miner') return (m.ore ? 0.55 : 0.05) * pw;
-  if (m.kind === 'furnace') return (m.fuel ? 2.5 : 1) / RECIPE.iron.t * pw * (m.on || (m.inp['iron ore'] || 0) + (m.inp['copper ore'] || 0) > 0.5 ? 1 : 0.4);
+  if (m.kind === 'furnace') return (m.fuel ? 2.5 : 1) / (RECIPE[m.rec] || RECIPE.iron).t * pw * (m.on || (m.inp['iron ore'] || 0) + (m.inp['lean ore'] || 0) + (m.inp['copper ore'] || 0) > 0.5 ? 1 : 0.4);
   if (m.kind === 'assembler' && RECIPE[m.recipe]) return massOf(RECIPE[m.recipe].out) / RECIPE[m.recipe].t * pw * (m.on ? 1 : 0.3);
   return 0;
 }
-const makes = m => m.kind === 'miner' ? Object.keys(m.out).filter(k => m.out[k] > 0.01).concat(m.oreId ? [m.oreId] : []) : m.kind === 'furnace' ? ((m.inp['copper ore'] || 0) > (m.inp['iron ore'] || 0) ? ['copper'] : ['iron']) : m.kind === 'assembler' && RECIPE[m.recipe] ? Object.keys(RECIPE[m.recipe].out) : [];
-const takes = (m, id) => m.kind === 'assembler' ? !!RECIPE[m.recipe] && id in RECIPE[m.recipe].in : m.kind === 'pad' ? id === 'part' : m.kind === 'furnace' ? id === 'iron ore' || id === 'copper ore' : false;
+const makes = m => m.kind === 'miner' ? Object.keys(m.out).filter(k => m.out[k] > 0.01).concat(m.oreId ? [m.oreId] : []) : m.kind === 'furnace' ? ((m.inp['copper ore'] || 0) > (m.inp['iron ore'] || 0) + (m.inp['lean ore'] || 0) + (m.inp.basalt || 0) ? ['copper'] : ['iron']) : m.kind === 'assembler' && RECIPE[m.recipe] ? Object.keys(RECIPE[m.recipe].out) : [];
+const takes = (m, id) => m.kind === 'assembler' ? !!RECIPE[m.recipe] && id in RECIPE[m.recipe].in : m.kind === 'pad' ? id === 'part' : m.kind === 'furnace' ? id === 'iron ore' || id === 'lean ore' || id === 'copper ore' : m.kind === 'assay station' ? id === 'rubble' : false;
 // who a machine's output should go to: the nearest machine that consumes it, else the ship hold
 export function sinkFor(m, id) {
   let best = null, bd = 1e9; const [x, y] = mid(m);
@@ -136,16 +142,23 @@ function planPower() {
   const nodes = [], P = S.P, rs = K.reactor.state, [rx, ry] = reactorPos(); let supply = 0, note = '';
   if (S.crash) { nodes.push([SHIP.x, SHIP.y + 1]); supply += AUX_W; }
   // the grid grows from the wreck through every machine within reach of a node that is already on it
-  const on = new Set(); let grew = true; const near = (x, y) => nodes.some(n => Math.hypot(n[0] - x, n[1] - y) < GRID_R);
-  const grow = () => { grew = true; while (grew) { grew = false; for (const m of F.machines) if (!on.has(m)) { const [x, y] = mid(m); if (near(x, y)) { on.add(m); if (m.kind !== 'belt') nodes.push([x, y]); grew = true; } } } };
+  // round 6 L: power is wire. Every machine hangs on the nearest node already on the grid by a cable the AI lays; a node
+  // is the wreck's bus, the reactor, a pole or a machine. The cable is sized for its current and loses I2R on its length.
+  const on = new Set(); let grew = true; const near = (x, y) => { let bn = null, bd = GRID_R; for (const n of nodes) { const d = Math.hypot(n[0] - x, n[1] - y); if (d < bd) { bd = d; bn = n; } } return bn; };
+  const grow = () => { grew = true; while (grew) { grew = false; for (const m of F.machines) if (!on.has(m)) { const [x, y] = mid(m), n = near(x, y); if (n) { on.add(m); m.gp = n; if (m.kind !== 'belt') nodes.push([x, y, m]); grew = true; } } } };
   grow();
-  const rOn = rs === 'ship' ? S.crash : nodes.length ? near(rx, ry) : true;
-  if (rOn) { if (!nodes.length || rs !== 'ship') { nodes.push([rx, ry]); grow(); } supply += Math.max(0, REACTOR_W - (K.pw.used || 0)); note = rs === 'ship' ? 'reactor in its bay' : rs === 'carried' ? 'reactor on your back, in reach' : 'reactor set down'; }
+  const rOn = rs === 'ship' ? S.crash : nodes.length ? !!near(rx, ry) : true, rCap = K.pw.cap || REACTOR_W; let rLink = null;
+  if (rOn) { if (!nodes.length || rs !== 'ship') { const n0 = near(rx, ry); if (n0) rLink = [rx, ry, n0[0], n0[1]]; nodes.push([rx, ry]); grow(); } supply += Math.max(0, rCap - (K.pw.used || 0)); note = rs === 'ship' ? 'reactor in its bay' : rs === 'carried' ? 'reactor on your back, in reach (throttled for heat)' : 'reactor set down'; }
   else note = S.crash ? 'wreck auxiliary bus only: the reactor is out of reach' : 'no source';
-  const loads = F.machines.filter(m => WATT[m.kind] > 0).sort((a, b) => (RANK[a.kind] ?? 9) - (RANK[b.kind] ?? 9)).map((m, i) => ({ id: i, m, w: WATT[m.kind] * (m.kind === 'belt' || m.kind === 'antenna' || m.kind === 'hub' || m.on || m.starved ? 1 : 0.05), from: on.has(m) ? ['grid'] : [] }));
-  const b = powerBudget([{ id: 'grid', w: supply }], loads);
-  for (const l of loads) { const f = b.served[l.id]; l.m.pw = f >= 0.999 ? 1 : f; l.m.starved = f < 0.999 && (l.m.on || l.m.starved) ? 1 : 0; l.m.grid = on.has(l.m); }
-  AUTO.power = { supply, demand: b.demand, used: b.used, note, off: loads.filter(l => !on.has(l.m) && l.m.kind !== 'belt').length };
+  const loads = F.machines.filter(m => WATT[m.kind] > 0).sort((a, b) => (RANK[a.kind] ?? 9) - (RANK[b.kind] ?? 9)).map((m, i) => ({ id: i, m, w: WATT[m.kind] * (m.kind === 'belt' || m.kind === 'antenna' || m.kind === 'hub' || m.kind === 'camera' || m.kind === 'radar' || m.kind === 'controller' || m.kind === 'air filter' || m.on || m.starved ? 1 : 0.02), from: on.has(m) ? ['grid'] : [] }));
+  const b = powerBudget([{ id: 'grid', w: supply }], loads), links = [], byM = new Map(); let lossW = 0;
+  for (const l of loads) { const f = b.served[l.id]; l.m.pw = f >= 0.999 ? 1 : f; l.m.starved = f < 0.999 && (l.m.on || l.m.starved) ? 1 : 0; l.m.grid = on.has(l.m); l.m.drawW = l.w * f; }
+  for (const m of F.machines) if (on.has(m) && m.gp && m.kind !== 'belt') { const [x, y] = mid(m), L = { ax: m.gp[0], ay: m.gp[1], bx: x, by: y, w: 0, m }; links.push(L); byM.set(m, L); }
+  for (const m of F.machines) { let w = m.drawW || 0, q = m, n = 0; if (!on.has(m) || !(w > 0)) continue; while (q && n++ < 40) { const L = byM.get(q); if (L) L.w += w; q = q.gp && q.gp[2]; if (!q && m.kind === 'belt') break; } }
+  for (const L of links) { const d = Math.hypot(L.bx - L.ax, L.by - L.ay), I = L.w / 800; L.mm2 = Math.max(16, Math.ceil(I / 4 / 16) * 16); L.loss = wireLoss(L.w, d, L.mm2); L.hot = L.m.starved === 1 && L.w > 1000; lossW += L.loss; if (L.w > 0 && L.m.pw) L.m.pw *= 1 - Math.min(0.2, L.loss / L.w); }
+  if (rLink) links.push({ ax: rLink[0], ay: rLink[1], bx: rLink[2], by: rLink[3], w: b.used, mm2: Math.max(16, Math.ceil(b.used / 800 / 4 / 16) * 16), loss: wireLoss(b.used, Math.hypot(rLink[2] - rLink[0], rLink[3] - rLink[1]), Math.max(16, Math.ceil(b.used / 800 / 4 / 16) * 16)) });
+  AUTO.links = links;
+  AUTO.power = { supply, demand: b.demand, used: b.used, note, off: loads.filter(l => !on.has(l.m) && l.m.kind !== 'belt').length, loss: lossW };
   return supply - b.used;
 }
 
@@ -165,7 +178,7 @@ export function queueView(robots) {
     else if (g.have) why = robots.length ? 'kit on site: waits for a free robot' : 'kit on site: stand by it and the suit builds';
     else if (st === 'stock') why = robots.length ? (isLinked((g.x + 0.5) * TS, (g.y + 1) * TS) ? `${item} in stock: waits for a free robot` : 'outside the network: no robot takes orders here') : `${item} in stock: stand by it and the suit builds`;
     else if (st && st.startsWith('short:')) { const k = st.slice(6); why = `waits for ${k}: ${(AUTO.short[k] || 0).toFixed(ITEMS[k] && ITEMS[k].u === 'ea' ? 0 : 1)} ${ITEMS[k] && ITEMS[k].u === 'ea' ? '' : 'kg '}short, none loose or stored${k.endsWith('ore') || k === 'basalt' || k === 'lumen' ? ' (cut some, or place a miner)' : ''}`; }
-    else { const o = AUTO.orderOf && AUTO.orderOf(item), pj = S.printer.q.find(j => j.r === item); why = K.fab && K.fab.r === item ? `ship fabricator is making the kit: ${Math.ceil(K.fab.left)} s` : pj ? `the arm is printing the kit: ${Math.ceil(pj.left)} s` : o ? (g.kind === 'wall' ? 'iron: ' : '') + (o.note || 'ordered') : g.kind === 'wall' ? 'iron is on its way' : 'the kit is being made'; }
+    else { const o = AUTO.orderOf && AUTO.orderOf(item), pj = S.printer.q.find(j => j.r === item); why = K.fab && K.fab.r === item ? `fabricator is making the kit: ${Math.ceil(K.fab.left)} s` : pj ? `the arm is printing the kit: ${Math.ceil(pj.left)} s` : o ? (g.kind === 'wall' ? 'iron: ' : '') + (o.note || 'ordered') : g.kind === 'wall' ? 'iron is on its way' : 'the kit is being made'; }
     out.push({ g, n: ++ahead, kind: g.kind, why, auto: !!g.auto, manual: g.key !== undefined && g.key !== null });
   }
   return out;

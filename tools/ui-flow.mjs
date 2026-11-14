@@ -37,7 +37,7 @@ console.log(JSON.stringify({split:a1, drag:a2, print:a3, ghost:a4, shots:a5, err
 // C: the round 3 start, with real keys (the round 5 ones): unbolt the laser (f), walk away from the wreck and fire (no
 // reactor in reach: nothing is cut), walk to the bay, pull the reactor (f), cut the ground (lmb),
 // gather a loose chunk by hand (v), drop it again (z), stand the laser on its legs (g), set the reactor down (x)
-errs.length=0; await page.goto(U+'?act=surface',{waitUntil:'load'}); await page.waitForFunction('window.__ready===true',{timeout:120000});
+errs.length=0; await page.goto(U+'?act=surface&scenario=slice',{waitUntil:'load'}); await page.waitForFunction('window.__ready===true',{timeout:120000});      // round 6: the suited start (the default start wakes you without the suit: tools/play.mjs plays that)
 const W=(js,t=180000)=>page.waitForFunction(js,{timeout:t});
 const c0=await page.evaluate(`[${D}.K.laser.state, ${D}.K.reactor.state, ${D}.S.inv.slots.filter(Boolean).map(s=>s.id).join()]`);
 await page.keyboard.press('f'); await W(`${D}.K.laser.state==="held"`);
@@ -45,7 +45,8 @@ await page.keyboard.down('d'); await W(`${D}.P.x>0.5`); await page.keyboard.up('
 await page.mouse.move(1150,640); await page.mouse.down(); await sleep(4000); await page.mouse.up(); const cNo=await page.evaluate(`[${D}.S.stats.dug, +${D}.K.laser.frac.toFixed(3)]`);
 await page.keyboard.down('a'); await W(`${D}.P.x<-7.7`); await page.keyboard.up('a'); await sleep(1500);
 await page.keyboard.press('f'); await W(`${D}.K.reactor.state==="carried"`); await W(`${D}.P.load>150`); const cLoad=await page.evaluate(`[Math.round(${D}.P.load), +${D}.P.mob.speed.toFixed(2), ${D}.P.mob.jet<8.7]`);
-await page.mouse.move(1150,640); await page.mouse.down(); await W(`${D}.S.stats.dug>20`); await page.mouse.up(); await W(`${D}.matter.list.length>0`);
+await page.mouse.move(1150,640); await page.mouse.down(); await W(`${D}.S.stats.dug>3`); await page.mouse.up();      // round 6: a pulse is a tenth of a kilogram of soil, and the sink holds 48 of them
+ await W(`${D}.matter.list.length>0`);
 await page.evaluate(`${D}.matter.spawn("basalt", 6, ${D}.P.x+0.4, ${D}.P.y+0.5)`); await page.keyboard.down('v'); await W(`${D}.S.count("basalt")>=5.99`); await page.keyboard.up('v');
 const n0=await page.evaluate(`${D}.matter.total("basalt")`); const bi=await page.evaluate(`${D}.S.inv.slots.findIndex(s=>s&&s.id==="basalt")`); await page.keyboard.press(String(bi+1)); await sleep(1500); await page.keyboard.press('z'); await W(`${D}.S.count("basalt")<0.01`); const cDrop=await page.evaluate(`[+(${D}.matter.total("basalt")-${n0}).toFixed(3)]`);
 await page.keyboard.press('g'); await W(`${D}.K.laser.state==="turret"`); await page.keyboard.press('x'); await W(`${D}.K.reactor.state==="ground"`); await sleep(1500);
@@ -60,14 +61,14 @@ await page.keyboard.press('Tab'); await W(`${D}.S.mode==="blueprint"`); await pa
 await page.mouse.move(620,512); await W(`Math.abs(${D}.S.cam.x-(${D}.P.x+(620-800)/${D}.S.ppm*0.22))<0.04 && Math.floor(${D}.S.mouse.y*2)===0`); await page.mouse.down(); await sleep(2500); await page.mouse.up(); await W(`${D}.BP.ghosts.some(g=>g.kind==="chest")`);      // free level ground between the furnace and the antenna
 const d0=await page.evaluate(`[${D}.BP.ghosts.map(g=>g.kind+(g.have?"+kit":"")).join(), ${D}.S.count("chest"), ${D}.SUP.targets.iron]`);
 await page.keyboard.press('Tab'); await W(`${D}.S.mode==="build"`); await page.keyboard.press('j'); await page.waitForSelector('#win.ai [data-a="tg-inc"][data-i="iron"]',{timeout:60000}); await page.waitForSelector('#win.ai [data-a="q-top"]',{timeout:60000});
-[x,y]=await box('#win.ai [data-a="tg-inc"][data-i="iron"]'); await page.mouse.click(x,y); await W(`${D}.SUP.targets.iron===35`);
+[x,y]=await box('#win.ai [data-a="tg-inc"][data-i="iron"]'); await page.mouse.click(x,y); await W(`${D}.SUP.targets.iron===${d0[2]+5}`);
 [x,y]=await box('#win.ai [data-a="q-top"]'); await page.mouse.click(x,y); await sleep(1500);
 const d1=await page.evaluate(`[${D}.SUP.targets.iron, document.querySelectorAll('#win.ai .qr').length, document.querySelector('#win.ai .qr .qw').textContent.slice(0,60)]`);
 await page.screenshot({path:path.join(root,'docs/shots/ai-flow.png')});
 await page.keyboard.press('Escape'); await W(`${D}.S.uiOpen===false`); for (let i=0;i<60 && !(await page.evaluate(`${D}.F.machines.some(m=>m.kind==="chest")`));i++) await page.evaluate('window.__dev.step(240)');      // software GL runs the game at a fifteenth of real time: the wait is stepped, two game seconds at a time
 const d2=await page.evaluate(`[${D}.F.machines.map(m=>m.kind).join(), ${D}.BP.ghosts.length]`);
 await page.keyboard.press('m'); await W(`${D}.S.zo>60`); const d3=await page.evaluate(`[Math.round(${D}.S.zo), Math.round(${D}.S.cam.y)]`); await page.keyboard.press('m'); await W(`${D}.S.zo<1.2`);
-console.log(JSON.stringify({placed:d0, ai:d1, built:d2, planet:d3, errs})); bad += errs.length + (d0[1]===0 && d1[0]===35 && /chest/.test(d2[0]) && d3[0]>60 && d3[1]<-600 ? 0 : 1);
+console.log(JSON.stringify({placed:d0, ai:d1, built:d2, planet:d3, errs})); bad += errs.length + (d0[1]===0 && d1[0]===d0[2]+5 && /chest/.test(d2[0]) && d3[0]>60 && d3[1]<-600 ? 0 : 1);
 // E: round 5, with real keys: a furnace held in slot 1 is placed with a click and is gone from the slot; a second click
 // places nothing; tab; q over the furnace picks it as a plan; a click elsewhere is a ghost; rmb takes the ghost back; r
 // turns the belt; q on nothing clears the cursor; tab leaves

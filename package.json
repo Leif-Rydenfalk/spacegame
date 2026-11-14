@@ -1,7 +1,7 @@
 {
   "name": "spacegame",
-  "version": "0.5.0",
-  "description": "spacegame demo 1, round 5: the robustness round. Collision that holds on worked ground at any speed, decks you drop through and a back wall behind every cut, rigid-body rock that breaks, drones that find their way and say what they do, one Factorio-like inventory you place from, and Tab for blueprint mode. On a whole round planet with an automation-first base and a real-scale orbital act, one page, three.js",
+  "version": "0.6.0",
+  "description": "spacegame demo 1, round 6: you wake without the suit, find it, and the one AI comes up; a task market of robots that bid, a ground hauler that finds its way and is lifted when stuck, queue-anything, stockpiles and a ledger you place from; a 2 MW reactor and a pulse laser limited by its heat sink, kerfs that free blocks, ablation, fists; composition fields with uncertainty, an assay station, a modular shaft rig, planned supports and collapse; a wreck of real parts you walk into, needs, fog of war, wires. One page, three.js",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",

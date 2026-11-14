@@ -15,6 +15,7 @@
 //   grazer, jelly, strider (herds, with calves), stalker (the predator): the natives
 // Walkers are follow-the-leader chains over the density field with two-segment analytic IK legs and stepping feet.
 import { G, events, rand, clamp } from '../core.js';
+import { ablate, punch, hpOf } from './physics.js';
 import { audio } from '../audio.js';
 import { world, TS, GRAV, M } from './world.js';
 import { light } from './light.js';
@@ -33,17 +34,18 @@ export const PLAYER_SIZE = 1.8;
 // size m, diet: 'hive' | 'prey' (eats animals) | 'graze' | 'drift'. wary = distance at which it stops and watches,
 // fleeD = distance at which it runs, nerve = metres of noise margin it stands before it runs, reach + kick = self-defence
 export const KIND = {
-  scout: { nodes: 7, gap: 0.36, legs: [1, 2, 3], l1: 0.6, l2: 0.72, clear: 0.5, thick: 0.34, speed: 2.0, run: 7.8, hp: 60, stride: 0.75, glow: C.cyan, stepT: 0.1, bite: 18, sense: 30, size: 1.2, diet: 'hive', stalks: 1, wary: 12, fleeD: 5, nerve: 30, drop: ['ichor', 0.6] },
-  swarmer: { nodes: 4, gap: 0.2, legs: [1, 2], l1: 0.3, l2: 0.36, clear: 0.26, thick: 0.2, speed: 2.6, run: 9.5, hp: 16, stride: 0.4, glow: C.acid, stepT: 0.06, bite: 6, sense: 22, size: 0.5, diet: 'hive', wary: 8, fleeD: 5, nerve: 20, drop: ['chitin', 0.4] },
-  brute: { nodes: 6, gap: 0.62, legs: [1, 2, 4], l1: 0.85, l2: 0.95, clear: 0.95, thick: 1.15, speed: 1.1, run: 4.6, hp: 520, stride: 0.8, glow: C.hot, stepT: 0.3, bite: 38, sense: 20, size: 2.8, diet: 'hive', armour: 0.45, wary: 8, fleeD: 0, nerve: 99, drop: ['chitin', 9] },
-  spitter: { nodes: 5, gap: 0.34, legs: [1, 3], l1: 0.55, l2: 0.6, clear: 0.6, thick: 0.42, speed: 1.6, run: 4.2, hp: 70, stride: 0.6, glow: C.acid, stepT: 0.16, bite: 8, sense: 28, size: 1.1, diet: 'hive', wary: 14, fleeD: 7, nerve: 30, drop: ['ichor', 1.5] },
-  grazer: { nodes: 5, gap: 0.5, legs: [1, 3], l1: 0.5, l2: 0.55, clear: 0.62, thick: 0.8, speed: 0.9, run: 2.6, hp: 160, stride: 0.5, glow: C.acid, stepT: 0.28, size: 1.5, diet: 'graze', wary: 9, fleeD: 4.5, nerve: 28, reach: 1.7, kick: 10, drop: ['chitin', 3] },
-  strider: { nodes: 5, gap: 0.42, legs: [1, 3], l1: 0.78, l2: 0.86, clear: 1.3, thick: 0.46, speed: 0.75, run: 6.4, hp: 120, stride: 0.85, glow: C.cyan, stepT: 0.17, size: 1.7, diet: 'graze', wary: 13.5, fleeD: 7.5, nerve: 10, reach: 1.9, kick: 12, beast: 1, drop: ['biomass', 14] },
-  calf: { nodes: 4, gap: 0.26, legs: [1, 2], l1: 0.46, l2: 0.52, clear: 0.78, thick: 0.28, speed: 0.9, run: 5.8, hp: 40, stride: 0.5, glow: C.cyan, stepT: 0.12, size: 0.9, diet: 'graze', wary: 15, fleeD: 9, nerve: 8, reach: 0, kick: 0, beast: 1, drop: ['biomass', 4] },
-  stalker: { nodes: 8, gap: 0.5, legs: [1, 3, 5], l1: 0.85, l2: 0.95, clear: 0.92, thick: 0.72, speed: 1.5, run: 8.4, hp: 900, stride: 0.95, glow: C.hot, stepT: 0.12, bite: 32, sense: 36, size: 2.7, diet: 'prey', stalks: 1, armour: 0.3, drop: ['chitin', 12] },
-  burrower: { worm: 1, nodes: 11, gap: 0.42, thick: 0.6, speed: 2.4, run: 4.2, hp: 190, glow: C.hot, bite: 26, sense: 40, size: 2.4, diet: 'hive', wary: 0, fleeD: 0, nerve: 99, drop: ['chitin', 4] },
-  flier: { fly: 1, nodes: 4, gap: 0.24, thick: 0.22, speed: 4, run: 9, hp: 30, glow: C.violet, bite: 10, sense: 34, size: 0.8, diet: 'hive', wary: 0, fleeD: 0, nerve: 99, drop: ['ichor', 0.3] },
-  jelly: { fly: 1, hp: 22, glow: C.violet, size: 0.6, diet: 'drift', wary: 0, fleeD: 0, nerve: 99, drop: ['ichor', 0.4] },
+  scout: { chitin: 0.001, kg: 2.5, nodes: 7, gap: 0.36, legs: [1, 2, 3], l1: 0.6, l2: 0.72, clear: 0.5, thick: 0.34, speed: 2.0, run: 7.8, hp: 50, stride: 0.75, glow: C.cyan, stepT: 0.1, bite: 7, sense: 30, size: 1.2, diet: 'hive', stalks: 1, wary: 12, fleeD: 5, nerve: 30, drop: ['ichor', 0.6] },
+  swarmer: { chitin: 0, kg: 0.6, nodes: 4, gap: 0.2, legs: [1, 2], l1: 0.3, l2: 0.36, clear: 0.26, thick: 0.2, speed: 2.6, run: 9.5, hp: 12, stride: 0.4, glow: C.acid, stepT: 0.06, bite: 3, sense: 22, size: 0.5, diet: 'hive', wary: 8, fleeD: 5, nerve: 20, drop: ['chitin', 0.4] },
+  brute: { chitin: 0.02, kg: 90, nodes: 6, gap: 0.62, legs: [1, 2, 4], l1: 0.85, l2: 0.95, clear: 0.95, thick: 1.15, speed: 1.1, run: 4.6, hp: 1800, stride: 0.8, glow: C.hot, stepT: 0.3, bite: 38, sense: 20, size: 2.8, diet: 'hive', armour: 0.45, wary: 8, fleeD: 0, nerve: 99, drop: ['chitin', 9] },
+  soldier: { nodes: 5, gap: 0.3, legs: [1, 2, 3], l1: 0.42, l2: 0.5, clear: 0.42, thick: 0.4, speed: 1.6, run: 6.2, kg: 10, chitin: 0.004, hp: 200, stride: 0.5, glow: C.hot, stepT: 0.12, bite: 14, sense: 24, size: 1.1, diet: 'hive', wary: 8, fleeD: 0, nerve: 99, drop: ['chitin', 1.5] },
+  spitter: { chitin: 0.001, kg: 4, nodes: 5, gap: 0.34, legs: [1, 3], l1: 0.55, l2: 0.6, clear: 0.6, thick: 0.42, speed: 1.6, run: 4.2, hp: 80, stride: 0.6, glow: C.acid, stepT: 0.16, bite: 8, sense: 28, size: 1.1, diet: 'hive', wary: 14, fleeD: 7, nerve: 30, drop: ['ichor', 1.5] },
+  grazer: { kg: 60, nodes: 5, gap: 0.5, legs: [1, 3], l1: 0.5, l2: 0.55, clear: 0.62, thick: 0.8, speed: 0.9, run: 2.6, hp: 160, stride: 0.5, glow: C.acid, stepT: 0.28, size: 1.5, diet: 'graze', wary: 9, fleeD: 4.5, nerve: 28, reach: 1.7, kick: 10, drop: ['chitin', 3] },
+  strider: { kg: 90, nodes: 5, gap: 0.42, legs: [1, 3], l1: 0.78, l2: 0.86, clear: 1.3, thick: 0.46, speed: 0.75, run: 6.4, hp: 120, stride: 0.85, glow: C.cyan, stepT: 0.17, size: 1.7, diet: 'graze', wary: 13.5, fleeD: 7.5, nerve: 10, reach: 1.9, kick: 12, beast: 1, drop: ['biomass', 14] },
+  calf: { kg: 20, nodes: 4, gap: 0.26, legs: [1, 2], l1: 0.46, l2: 0.52, clear: 0.78, thick: 0.28, speed: 0.9, run: 5.8, hp: 40, stride: 0.5, glow: C.cyan, stepT: 0.12, size: 0.9, diet: 'graze', wary: 15, fleeD: 9, nerve: 8, reach: 0, kick: 0, beast: 1, drop: ['biomass', 4] },
+  stalker: { chitin: 0.012, kg: 220, nodes: 8, gap: 0.5, legs: [1, 3, 5], l1: 0.85, l2: 0.95, clear: 0.92, thick: 0.72, speed: 1.5, run: 8.4, hp: 900, stride: 0.95, glow: C.hot, stepT: 0.12, bite: 32, sense: 36, size: 2.7, diet: 'prey', stalks: 1, armour: 0.3, drop: ['chitin', 12] },
+  burrower: { chitin: 0.008, kg: 35, worm: 1, nodes: 11, gap: 0.42, thick: 0.6, speed: 2.4, run: 4.2, hp: 700, glow: C.hot, bite: 26, sense: 40, size: 2.4, diet: 'hive', wary: 0, fleeD: 0, nerve: 99, drop: ['chitin', 4] },
+  flier: { chitin: 0, kg: 0.8, fly: 1, nodes: 4, gap: 0.24, thick: 0.22, speed: 4, run: 9, hp: 16, glow: C.violet, bite: 4, sense: 34, size: 0.8, diet: 'hive', wary: 0, fleeD: 0, nerve: 99, drop: ['ichor', 0.3] },
+  jelly: { kg: 0.4, fly: 1, hp: 22, glow: C.violet, size: 0.6, diet: 'drift', wary: 0, fleeD: 0, nerve: 99, drop: ['ichor', 0.4] },
 };
 // what a creature does about the player. Pure. ctx: { dist, hurt, cornered, noise (m of margin it hears), order, hp 0..1 }
 //   'hunt' a predator bigger than you   'attack' the hive's order, or a hive animal that was hurt   'probe' come and look
@@ -66,12 +68,32 @@ export function spawnCreature(type, x, y, goal) {
   }
   creatures.push(c); return c;
 }
-export function hurtCreature(c, x, y, dmg, vx, vy, beam) {
-  let hit = false; const k = KIND[c.type];
-  if (c.type === 'jelly') hit = Math.hypot(x - c.x, y - c.y) < 0.4;
+// which segment of the body is at (x, y): its index, or -1
+export function hitNode(c, x, y) {
+  const k = KIND[c.type]; if (c.type === 'jelly') return Math.hypot(x - c.x, y - c.y) < 0.4 ? 0 : -1;
+  for (let i = 0; i < c.nodes.length; i++) if (Math.hypot(x - c.nodes[i].x, y - c.nodes[i].y) < k.thick * 0.6 + 0.05) return i; return -1;
+}
+// one laser pulse of E joules on the body at (x, y) (round 6 H: damage from physics, not from a number on the gun).
+// Chitin is ablated first and spreads the spot: a pulse that does not get through scorches it, and the next one has
+// less to get through. What is left drills a channel through tissue; through the core of the head or the thorax that
+// kills, anywhere else it costs the body the mass it vaporised. Returns null (missed) or { used J, killed }.
+export function hurtPulse(c, x, y, E, dx, dy) {
+  const i = hitNode(c, x, y); if (i < 0 || c.hp <= 0) return null; const k = KIND[c.type], ch = Math.max(0, (k.chitin || 0) - (c.scorch || 0)), r = ablate(E, ch);
+  if (!r.through) { c.scorch = (c.scorch || 0) + r.chitin; hurtCreature(c, x, y, 0.01, dx * 40, dy * 40, true, true); return { used: E, killed: false, scorched: true }; }
+  c.scorch = k.chitin || 0; const body = Math.max(0.03, k.thick * 0.6), vital = i <= 1 && r.depth >= body * 0.5, dmg = vital ? c.hp + 1 : k.diet === 'hive' ? r.grams * (k.hp / hpOf(k.kg || 5)) : r.grams * 2;       // an animal that is not of the hive is stopped by pain and shock long before it is destroyed
+  hurtCreature(c, x, y, dmg, dx * 40, dy * 40, true, true); return { used: E * Math.min(1, body / Math.max(r.depth, 1e-3)), killed: c.hp <= 0, vital };
+}
+// a blow: an impulse against the body's mass (physics.js punch). Small bodies fly and break; big ones hardly notice.
+export function hurtPunch(c, x, y, dir, glove = 1) {
+  if (hitNode(c, x, y) < 0 && Math.hypot(c.x - x, c.y - y) > 0.5 + KIND[c.type].thick * 0.5) return null; const k = KIND[c.type], p = punch(k.kg || 5, glove);
+  c.vx += dir * Math.min(p.dv, 14); c.vy = (c.vy || 0) + Math.min(p.dv * 0.3, 4); hurtCreature(c, c.x, c.y, k.hp * p.frac, dir * 200, 60, false, true); return p;
+}
+export function hurtCreature(c, x, y, dmg, vx, vy, beam, sure) {
+  let hit = !!sure; const k = KIND[c.type];
+  if (hit) { /* the caller has done the hit test */ } else if (c.type === 'jelly') hit = Math.hypot(x - c.x, y - c.y) < 0.4;
   else for (const n of c.nodes) if (Math.hypot(x - n.x, y - n.y) < k.thick * 0.6 + 0.05) { hit = true; break; }
   if (!hit || c.hp <= 0) return false;
-  c.hp -= dmg * (1 - (k.armour || 0)); c.flash = 0.12; if (!beam) c.vx += vx * 0.002 / (1 + k.thick * 2);
+  c.hp -= sure ? dmg : dmg * (1 - (k.armour || 0)); c.flash = 0.12; c.hitBy = G.time; if (!beam) c.vx += vx * 0.002 / (1 + k.thick * 2);
   c.hurtT = 9; c.t = 5; if (k.diet === 'hive') { if (c.order !== 'attack') { c.order = 'attack'; events.emit('hiveHurt', c); } if (c.state !== 'flee') c.state = 'charge'; } else if (k.diet === 'prey') { if (c.state !== 'flee') c.state = 'charge'; } else c.state = 'flee';
   const g = k.glow;
   if (!beam || Math.random() < 0.2) for (let i = 0; i < (beam ? 2 : 10); i++) S.parts.spawn({ x, y, vx: vx * rand(0.003, 0.012) + rand(-3, 3), vy: vy * rand(0.003, 0.012) + rand(-1, 5), life: rand(0.5, 2.2), size: rand(0.04, 0.09), c: mul(g, 2.5), c2: mul(g, 0.5), col: 1, bounce: 0.15 });
@@ -103,7 +125,7 @@ export function stepCreatures(dt) {
       const w = P.dead || dist > 5 ? 0 : -1.4 * (1 - dist / 5); c.vx += (dx / (dist + 1) * w + Math.sin(c.seed + c.t * 0.7) * 0.3 - c.vx * 0.8) * dt; c.vy += (dy / (dist + 1) * w + Math.sin(c.seed * 3 + c.t * 1.9) * 0.6 - c.vy * 0.8) * dt;      // it drifts, and drifts away from you
       if (world.solidAt(c.x + c.vx * 0.5, c.y)) c.vx = -c.vx; if (world.solidAt(c.x, c.y + c.vy * 0.5 - 0.8)) c.vy = Math.abs(c.vy) + 0.2; if (world.solidAt(c.x, c.y + 0.6)) c.vy = -Math.abs(c.vy);
       c.x += c.vx * dt; c.y += c.vy * dt;
-      if (dist < 0.5 && c.bite <= 0 && !P.dead) { c.bite = 1.5; S.hurt(6, dx * 2, 1); }                 // touch it and it stings: that is all the defence it has
+      if (dist < 0.5 && c.bite <= 0 && !P.dead) { c.bite = 1.5; S.hurt(6, dx * 2, 1, c); }                 // touch it and it stings: that is all the defence it has
       c.tent.forEach((s, ti) => { s[0].x = c.x + (ti - 2) * 0.11; s[0].y = c.y - 0.12; for (let j = 1; j < s.length; j++) { const p = s[j], vx = (p.x - p.px) * 0.96, vy = (p.y - p.py) * 0.96; p.px = p.x; p.py = p.y; p.x += vx + Math.sin(c.t * 2 + ti + j) * 0.0006; p.y += vy - 1.2 * dt * dt; const q = s[j - 1], ex = p.x - q.x, ey = p.y - q.y, l = Math.hypot(ex, ey) || 1; p.x = q.x + ex / l * 0.16; p.y = q.y + ey / l * 0.16; } });
       continue;
     }
@@ -126,7 +148,7 @@ export function stepCreatures(dt) {
       }
       N[0].x = c.x; N[0].y = c.y;
       for (let j = 1; j < N.length; j++) { const n = N[j], q = N[j - 1], ex = n.x - q.x, ey = n.y - q.y + (k.fly ? 0 : 0), l = Math.hypot(ex, ey) || 1; n.x = q.x + ex / l * k.gap; n.y = q.y + ey / l * k.gap; }
-      if (isP && c.agg && dist < (k.worm ? 1.1 : 0.8) && c.bite <= 0) { c.bite = k.worm ? 1.2 : 0.8; c.cd = 2.5; S.hurt(k.bite, Math.sign(dx) * -3 + c.vx * 0.4, 2.5); audio.play('bite'); if (k.fly) { c.vy = 6; c.vx *= -0.6; } }
+      if (isP && c.agg && dist < (k.worm ? 1.1 : 0.8) && c.bite <= 0) { c.bite = k.worm ? 1.2 : 0.8; c.cd = 2.5; S.hurt(k.bite, Math.sign(dx) * -3 + c.vx * 0.4, 2.5, c); audio.play('bite'); if (k.fly) { c.vy = 6; c.vx *= -0.6; } }
       continue;
     }
     let want = 0; c.up += ((st === 'watch' || st === 'probe' || c.state === 'flee' || c.agg ? 1 : c.idle ? 0 : 0.55) - c.up) * Math.min(1, dt * 4);
@@ -137,7 +159,7 @@ export function stepCreatures(dt) {
         if (dist < 13) { c.saw = true; want = dist < 8 ? -k.speed : 0; c.dir = Math.sign(dx) || 1; c.watch = (c.watch || 0) + dt; } else want = d < 2 ? 0 : k.run * 0.55; if (d < 2 && dist >= 13) c.watch = (c.watch || 0) + dt * 2;
         if ((c.watch || 0) > 9) c.goal = { x: c.home ? c.home.x : c.x, y: c.y, home: true }; }
     } else if (c.agg) {
-      if (c.hp < k.hp * 0.15 && c.type !== 'swarmer' && c.type !== 'brute') c.state = 'flee';
+      if (c.hp < k.hp * 0.15 && c.type !== 'swarmer' && c.type !== 'brute' && c.type !== 'soldier') c.state = 'flee';
       else if (c.state === 'flee' && c.t < 0) c.state = 'stalk';
       else if (tg) { if (c.state === 'wander') { c.state = isP ? 'stalk' : 'seek'; c.t = 0; } if (c.state === 'seek' && isP) c.state = 'stalk'; if (c.state === 'stalk' && !isP) c.state = 'seek'; }
       else if (c.state !== 'flee' && c.state !== 'wander') { c.state = 'wander'; c.t = 0; }
@@ -151,9 +173,9 @@ export function stepCreatures(dt) {
       if (c.state === 'seek') { c.dir = Math.sign(tdx) || 1; want = td < 1.5 ? 0 : k.run * 0.7; if (td < 2.5) { c.goal = null; wreck(c, k, dt); } }
       if (c.state === 'charge') { c.dir = Math.sign(dx) || 1; want = k.run; if (c.t < 0 && dist > 14) c.state = 'stalk'; if (c.type === 'spitter' && dist > 5) c.state = 'stalk'; }
       if (c.state === 'flee') { c.dir = -Math.sign(dx) || 1; want = k.run * 0.8; }
-      if (dist < 0.9 + k.thick * 0.7 && c.bite <= 0 && c.state === 'charge' && !P.dead) { c.bite = c.type === 'swarmer' ? 0.55 : 0.9; S.hurt(k.bite, c.dir * (3 + k.thick * 6) + c.vx * 0.3, 3.5); audio.play('bite'); c.vx *= -0.4; if (c.type === 'stalker') { c.state = 'flee'; c.t = 2.2; } }
+      if (dist < 0.9 + k.thick * 0.7 && c.bite <= 0 && c.state === 'charge' && !P.dead) { c.bite = c.type === 'swarmer' ? 0.55 : 0.9; S.hurt(k.bite, c.dir * (1 + k.thick * 6) * Math.min(1, (k.kg || 5) / 20) + c.vx * 0.3 * Math.min(1, (k.kg || 5) / 20), 3.5 * Math.min(1, (k.kg || 5) / 10), c); audio.play('bite'); c.vx *= -0.4; if (c.type === 'stalker') { c.state = 'flee'; c.t = 2.2; } }
     } else {                           // wary: watch, keep away, run; strike back only when hurt or cornered
-      if (st === 'defend' && c.bite <= 0) { c.bite = 1.4; S.hurt(k.kick, Math.sign(dx) * 7, 3.5); audio.play('bite'); c.state = 'flee'; c.t = 4; c.stuck = 0; }
+      if (st === 'defend' && c.bite <= 0) { c.bite = 1.4; S.hurt(k.kick, Math.sign(dx) * 7, 3.5, c); audio.play('bite'); c.state = 'flee'; c.t = 4; c.stuck = 0; }
       if ((st === 'flee' || (c.spook < 0 && c.spook > -dt * 2 && c.herd)) && c.state !== 'flee') {
         c.state = 'flee'; c.t = rand(3.5, 6); c.fx = dist < 30 ? P.x : hd ? hd.x : P.x; if (c.type !== 'calf') audio.play('call');
         if (c.herd) for (const o of creatures) if (o !== c && o.herd === c.herd && o.state !== 'flee' && Math.abs(o.x - c.x) < 16) o.spook = rand(0.08, 0.5);      // the herd goes as one, a moment apart
@@ -203,6 +225,7 @@ function spit(c, P) {
 function wreck(c, k, dt) { if (S.wreck) S.wreck(c.x, c.y, (k.bite || 5) * dt * 0.8); }
 export function drawCreatures(b, time) {
   for (const c of creatures) {
+    if (S.visible && !S.visible(c)) continue;      // what no sensor sees is not drawn (fog.js draws its ghost or its blob)
     const fl = c.flash > 0 ? 3 : 1, k = KIND[c.type];
     if (c.type === 'jelly') {
       const p = 0.6 + 0.4 * Math.sin(time * 2 + c.seed);

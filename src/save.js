@@ -4,7 +4,7 @@
 // identity can replace it later with save.use(adapter): nothing else in the game touches storage.
 // A blob is { version, rev, savedAt, hash, data }. data = { seed, act, time, playerId, parts: { name: dump } }.
 import { G } from './core.js';
-export const VERSION = 5;
+export const VERSION = 6;
 // version n -> n + 1. Version 1 was demo 1, which had no saves. Version 3 (round 3) added the kit (ship laser and
 // reactor instead of the laser drill item), loose matter, the ship hold and the stock targets: a version 2 save gets
 // the kit on the player's back, an empty hold, and no loose matter. Its rifle and shotgun stay in the pack.
@@ -13,7 +13,7 @@ const MIGRATE = { 1: b => { b.version = 2; return b; }, 2: b => { b.version = 3;
   return b; },
   // version 4 (round 4): the world is a round planet. A flat round 3 save maps straight onto it: x was metres from the
   // crash site and still is, now along the circumference (anything beyond half of it wraps round); edited terrain
-  // chunks are folded onto the circle when they load; the build queue gets its order, the ship AI its routes.
+  // chunks are folded onto the circle when they load; the build queue gets its order, the AI its routes.
   3: b => { b.version = 4; const s = b.data && b.data.parts && b.data.parts.surface; if (s && s.auto === undefined) s.auto = { on: 1, st: [] }; return b; },
   // version 5 (round 5): decks (the passable layer), the list of items the base has seen (it decides which recipes are
   // shown), loose bodies with a shape and a pose, and Tab's blueprint mode in place of the old one. A version 4 save
@@ -24,6 +24,19 @@ const MIGRATE = { 1: b => { b.version = 2; return b; }, 2: b => { b.version = 3;
     if (!s.plats) s.plats = [];
     if (!s.known) { const k = new Set(), add = a => { for (const q of a || []) if (q) k.add(q[0]); }; add(s.inv); add(s.kit && s.kit.hold); for (const m of (s.factory && s.factory.m) || []) { add(m.inv); for (const id in m.i || {}) k.add(id); for (const id in m.o || {}) k.add(id); k.add(m.k); } for (const q of s.matter || []) k.add(q[0]); s.known = [...k].sort(); }
     if (s.mode === 'blueprint') s.mode = 'build';
+    return b; },
+  // version 6 (round 6): the exosuit is an object of its own (a version 5 player was in it: it is on, whole, and the AI is
+  // up), the wreck is a list of parts (all still in it), the mine, the geology that has been measured (nothing: what a
+  // version 5 game dug it dug without a scanner, so the crash site counts as scanned from the cuts that were made
+  // there), the sensors' data, the stockpile zones (the AI opens them when it next tidies). Robots keep their place and
+  // their load and get the new battery; a kit weighs what went into it now, so nothing in a slot changes but its mass.
+  // Items and recipes that are gone are dropped where they are named (a stock target, a fabricator job).
+  5: b => { b.version = 6; const s = b.data && b.data.parts && b.data.parts.surface; if (!s) return b;
+    s.suit = { on: 1, id: 'exo-0001', cond: 1, slots: {}, wear: {}, pin: 0, hist: [[0, 'carried over from a round 5 save']], water: 0, boot: 1, needs: [0.8, 0.75, 0.85, 0.25], edible: {} };
+    s.wreck = null; s.mine = null; s.fog = null; s.stock = null; s.stage = 2; s.dev = 0;
+    const k = []; for (let x = -30; x < 30; x++) for (let y = -12; y < 8; y++) k.push([(x + 8192) * 16384 + y + 8192, 1]); s.geo = { k, s: 1, a: 0 };
+    if (s.supply && s.supply.t) { delete s.supply.t['power cell']; delete s.supply.t['o2 cell']; }
+    for (const r of s.robots || []) r.wh = r.k ? 400 : 250;
     return b; } };
 const parts = {};
 export function fnv(str) { let h = 0x811c9dc5; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(16).padStart(8, '0'); }

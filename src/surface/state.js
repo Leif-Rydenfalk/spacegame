@@ -9,7 +9,7 @@ export const S = {
   // your hands or the base's stores, which is what decides the recipes you are shown
   mode: 'build', plan: null, tool: null, known: new Set(), uiOpen: false, msg: '', msgT: 0, stats: { kills: {}, dug: 0, vapor: 0, shots: 0 }, open: null,
   // amounts are floats; add returns what did not fit (slot space or the suit's carry limit)
-  add(k, n = 1) { if (n > 0 && ITEMS[k]) this.known.add(k); return inv.add(this.inv, k, n, CARRY - inv.mass(this.inv) + (ITEMS[k].u === 'ea' ? 1e9 : 0)); },
+  add(k, n = 1) { if (n > 0 && ITEMS[k]) this.known.add(k); return inv.add(this.inv, k, n, (this.carry || CARRY) - inv.mass(this.inv) + (ITEMS[k].u === 'ea' && (this.carry || CARRY) > 100 ? 1e9 : 0)); },
   count(k) { return inv.count(this.inv, k); },
   has(cost) { return inv.has(this.inv, cost); },
   pay(cost) { return inv.pay(this.inv, cost); },
@@ -25,4 +25,5 @@ export const C = {   // linear colours
 export const mul = (c, k) => [c[0] * k, c[1] * k, c[2] * k];
 export const mix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 // a recipe is shown once every input of it is known (or you hold what it makes)
-export const canSee = r => Object.keys(r.in).every(k => S.known.has(k)) || Object.keys(r.out).some(k => S.known.has(k) && ITEMS[k].build);
+// (round 6 Q: and nothing from a later stage of automation than the one the base is in; nothing that still needs a discovery)
+export const canSee = r => { const out = Object.keys(r.out)[0], d = ITEMS[out]; if (d.stage && !S.dev && (S.stage || 1) < d.stage) return false; if (r.needs && !S.known.has(r.needs)) return false; return Object.keys(r.in).every(k => S.known.has(k)) || (S.known.has(out) && d.build); };

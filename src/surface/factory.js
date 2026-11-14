@@ -7,17 +7,17 @@ import { world, TS, M, MAT } from './world.js';
 import { light } from './light.js';
 import { S, C, mul } from './state.js';
 import { env } from './env.js';
-import { ITEMS, RECIPE, RECIPES, makeInv, inv } from '../items.js';
+import { ITEMS, RECIPE, RECIPES, makeInv, inv, mixQ } from '../items.js';
 import { platAt } from './layers.js';
 
 // sink(cell x, row, item, n) -> what was not taken, or null when nothing takes items there (the ship hold's intake)
-export const F = { machines: [], items: [], cells: new Map(), pad: null, printer: null, sink: null };
+export const F = { machines: [], items: [], cells: new Map(), pad: null, printer: null, sink: null, onPlace: null, onRemove: null, stepExtra: null, drawExtra: null, rock: null };
 export const ROCKET_PARTS = 12;
 // w, h in cells; takes = what it accepts; noise = audible radius while running; poll = pollution per second
 export const DEFS = {
   belt: { w: 1, h: 1, hp: 40 },
   miner: { w: 2, h: 2, hp: 160, noise: 30, poll: 0.25 },
-  furnace: { w: 2, h: 2, hp: 220, takes: ['iron ore', 'copper ore', 'biomass'], noise: 20, poll: 0.9 },
+  furnace: { w: 2, h: 2, hp: 220, takes: ['iron ore', 'lean ore', 'copper ore', 'basalt', 'biomass'], noise: 20, poll: 0.9 },
   assembler: { w: 3, h: 2, hp: 200, noise: 24, poll: 0.2 },
   chest: { w: 2, h: 2, hp: 120 },
   antenna: { w: 1, h: 4, hp: 80 },
@@ -40,13 +40,13 @@ export function place(kind, gx, gy, dir = 1, quiet) {
   let deck = false; for (let i = 0; i < d.w; i++) if (platAt(gx + i, gy - 1) && !world.solidAt((gx + i + 0.5) * TS, gy * TS - 0.3)) deck = true;
   world.box(gx * TS + 0.02, gy * TS, (gx + d.w) * TS - 0.02, (gy + d.h) * TS, -1); if (!deck) world.box(gx * TS, gy * TS - 0.3, (gx + d.w) * TS, gy * TS - 0.02, 1, M.PLATE);
   if (kind === 'chest') m.inv = makeInv(24); if (kind === 'assembler') m.recipe = 'part'; if (kind === 'miner') m.depth = 0.5; if (kind === 'hub') m.drones = 0;
-  if (kind === 'pad') F.pad = m; if (kind === 'bio-printer') { F.printer = m; if (!quiet) events.emit('printerBuilt'); }
+  if (kind === 'pad') F.pad = m; if (kind === 'bio-printer') { F.printer = m; if (!quiet) events.emit('printerBuilt'); } if (F.onPlace) F.onPlace(m);
   F.machines.push(m); if (!quiet) { audio.play('place'); events.emit('built', kind); } return m;
 }
 export function removeMachine(m) {
   const i = F.machines.indexOf(m); if (i < 0) return; F.machines.splice(i, 1);
   for (let a = 0; a < m.w; a++) for (let b = 0; b < m.h; b++) F.cells.delete(key(m.x + a, m.y + b));
-  if (F.pad === m) F.pad = null; if (F.printer === m) F.printer = F.machines.find(q => q.kind === 'bio-printer') || null; if (S.open === m) S.open = null;
+  if (F.onRemove) F.onRemove(m); if (F.pad === m) F.pad = null; if (F.printer === m) F.printer = F.machines.find(q => q.kind === 'bio-printer') || null; if (S.open === m) S.open = null;
 }
 export const accepts = (m, id) => {
   if (m.kind === 'chest') return true; if (m.kind === 'assembler') return RECIPE[m.recipe] && id in RECIPE[m.recipe].in && (m.inp[id] || 0) < RECIPE[m.recipe].in[id] * 4 + 1;
@@ -87,15 +87,17 @@ export function stepFactory(dt) {
     const d = DEFS[m.kind], pw = m.pw === undefined ? 1 : m.pw; if (m.hurt > 0) m.hurt -= dt;      // pw = the share of its power the grid gives it (auto.js)
     if (m.kind === 'miner') {       // bores down under itself; the ore the bit removes is what comes out, to the gram
       m.on = outTotal(m) < 30 && m.depth < 9 && pw > 0.05;
-      if (m.on) { m.t += dt * pw; if (m.t >= 0.25) { m.t = 0; const acc = {}, hx = (m.x + 1) * TS, hy = m.y * TS - m.depth; world.dig(hx, hy, 0.42, 0.06, acc, q => q >= M.XENO); let got = 0; for (const k in acc) { if (acc[k] > 0 && +k >= M.IRON && +k <= M.LUMEN) { push(m, MAT[k].item, acc[k]); got += acc[k]; m.oreId = MAT[k].item; } } if (got < 0.02) m.depth += 0.08; m.ore = got > 0.02; } }
+      if (m.on) { m.t += dt * pw; if (m.t >= 0.25) { m.t = 0; const acc = {}, hx = (m.x + 1) * TS, hy = m.y * TS - m.depth; world.dig(hx, hy, 0.42, 0.06, acc, q => q >= M.XENO); let got = 0; for (const k in acc) { if (acc[k] > 0 && +k >= M.BASALT && +k <= M.LUMEN && F.rock) { for (const [id, kg, q] of F.rock(+k, acc[k], hx, hy)) { push(m, id, kg); if (q) m.q = mixQ(m.q, (m.out[id] || 0) - kg, q, kg); if (+k >= M.IRON) m.oreId = id; } got += acc[k]; } } if (got < 0.02) m.depth += 0.08; m.ore = got > 0.02; } }
     } else if (m.kind === 'furnace') {   // continuous smelting; biomass in the firebox makes it 2.5 times faster
-      const r = m.inp['iron ore'] > 0.01 ? RECIPE.iron : m.inp['copper ore'] > 0.01 ? RECIPE.copper : null; m.on = !!r && outTotal(m) < 40 && pw > 0.05;
-      if (m.on) { if (!m.lit) { m.lit = true; events.emit('furnaceLit'); } const ore = Object.keys(r.in)[0], fuel = m.inp.biomass > 0.001, kg = Math.min(dt / r.t * (fuel ? 2.5 : 1) * pw, m.inp[ore] / r.in[ore]); m.inp[ore] -= kg * r.in[ore]; if (fuel) m.inp.biomass = Math.max(0, m.inp.biomass - kg * 0.06); push(m, r.id, kg); m.fuel = fuel; }
+      // rich ore first, then lean ore, then copper ore, then any rock by electrolysis (which also gives oxygen and silicon)
+      let r = null; for (const q of RECIPES) if (q.by === 'furnace' && (m.inp[Object.keys(q.in)[0]] || 0) > 0.01) { r = q; break; } m.on = !!r && outTotal(m) < 60 && pw > 0.05;
+      if (m.on) { if (!m.lit) { m.lit = true; events.emit('furnaceLit'); } const ore = Object.keys(r.in)[0], main = Object.keys(r.out)[0], fuel = m.inp.biomass > 0.001, kg = Math.min(dt / r.t * (fuel ? 2.5 : 1) * pw, m.inp[ore] / r.in[ore]); m.inp[ore] -= kg * r.in[ore]; if (fuel) m.inp.biomass = Math.max(0, m.inp.biomass - kg * 0.06); for (const k in r.out) push(m, k, kg * r.out[k] / r.out[main]); m.fuel = fuel; m.rec = r.id; }
     } else if (m.kind === 'assembler') {  // batches of its one recipe
       const r = RECIPE[m.recipe];
       if (!m.busy && r && outTotal(m) < 60) { let ok = true; for (const k in r.in) if ((m.inp[k] || 0) < r.in[k] - 1e-9) ok = false; if (ok) { for (const k in r.in) m.inp[k] -= r.in[k]; m.busy = true; m.t = 0; } }
       m.on = !!m.busy && pw > 0.05; if (m.busy) { m.t += dt * pw; if (m.t >= r.t) { m.busy = false; for (const k in r.out) push(m, k, r.out[k]); } }
     } else if (m.kind === 'hub') m.on = m.drones > 0 || (m.out.n | 0) > 0;
+    else if (F.stepExtra) F.stepExtra(m, dt, pw);
     if (m.on && d.noise) { m.nt -= dt; if (m.nt <= 0) { m.nt = 0.6; env.noise((m.x + m.w / 2) * TS, (m.y + 1) * TS, d.noise); env.pollute((m.x + 1) * TS, m.y * TS, d.poll * 0.6 * (m.kind === 'furnace' && !m.fuel ? 0.3 : 1)); } }
     if (m.kind !== 'belt' && m.kind !== 'chest') for (const id in m.out) {          // lumps onto a belt that leads away from either side
       const u = ITEMS[id].u, lump = u === 'ea' ? 1 : u === 'rd' ? Math.min(30, m.out[id]) : LUMP; if (m.out[id] < lump - 1e-9 && !(u !== 'ea' && !m.on && m.out[id] > 0.05)) continue;
@@ -164,6 +166,7 @@ export function drawMachine(b, m, time, a = 1, ghost = false) {
     const p = 0.6 + 0.4 * Math.sin(time * 3 + m.seed); A(cx, y + 0.2, w, 0.4, 0, mul(C.steel, 0.6), 1, 0, md, 5); A(cx, y + 0.6, w * 0.5, 0.5, 0, C.dark, 1, 0, md, 2); A(cx - w * 0.36, y + 0.75, 0.07, 1.1, 0, mul(C.steel, 0.8)); A(cx + w * 0.36, y + 0.75, 0.07, 1.1, 0, mul(C.steel, 0.8)); A(cx, y + 1.3, w * 0.86, 0.06, 0, C.steel);
     if (!ghost) { b.add(cx, y + 0.92, 0.3, 0.1, 0, mul(C.cyan, 1.5 * p), 1, 2, 2); b.add(cx, y + 1.36, 0.06, 0.06, 0, mul(C.amber, 2.5), 1, 1, 2); light.emit(m.x + 1, m.y + 2, 0.02, 0.25 * p, 0.2 * p); for (let i = 0; i < Math.min(m.drones | 0, 4); i++) b.add(x + 0.2 + i * 0.2, y + 1.42, 0.14, 0.08, 0, mul(C.hull, 0.7), 1, 0, 1, i); }
   }
+  else if (F.drawExtra) F.drawExtra(b, m, time, a, ghost, A, md);
   if (!ghost && m.kind !== 'belt') { let i = 0; for (const id in m.out) { if (i < 4 && m.out[id] > 0.05) b.add(x + w - 0.14 - i * 0.2, y + h + 0.1, 0.16, 0.12, 0, ITEMS[id].c || C.steel, 1, 0, 1, i); i++; } }
 }
 export function drawFactory(b, time) {
@@ -179,11 +182,11 @@ export function buildScenario() {
   const pad = place('pad', -1, y, 1, true); pad.n = 6; fu.inp['iron ore'] = 30; fu.inp.biomass = 4; as.inp.iron = 30; place('bio-printer', 9, y, 1, true);
   const ch = place('chest', 13, y, 1, true); inv.add(ch.inv, 'iron', 120); inv.add(ch.inv, 'copper', 40); inv.add(ch.inv, 'biomass', 30);
 }
-export function dumpFactory() { return { m: F.machines.map(m => ({ k: m.kind, x: m.x, y: m.y, d: m.dir, i: m.inp, o: m.out, t: +m.t.toFixed(3), n: m.n, hp: m.hp, r: m.recipe, dp: m.depth, dr: m.drones, b: m.busy ? 1 : 0, inv: m.inv ? inv.dump(m.inv) : undefined, dc: m.decon ? 1 : undefined, a: m.auto ? 1 : undefined })), it: F.items.map(i => [i.id, i.n, +i.x.toFixed(3), i.y]) }; }
+export function dumpFactory() { return { m: F.machines.map(m => ({ k: m.kind, x: m.x, y: m.y, d: m.dir, i: m.inp, o: m.out, t: +m.t.toFixed(3), n: m.n, hp: m.hp, r: m.recipe, dp: m.depth, dr: m.drones, b: m.busy ? 1 : 0, inv: m.inv ? inv.dump(m.inv) : undefined, dc: m.decon ? 1 : undefined, a: m.auto ? 1 : undefined, x6: m.kind === 'shaft rig' ? { tg: m.target, hd: m.head, hs: m.hoist ? 1 : 0, br: m.branches, paid: m.paid } : undefined, q: m.q ? [m.q.fe, m.q.cu, m.q.lm, m.q.host] : undefined, qi: m.qIn ? [m.qIn.fe, m.qIn.cu, m.qIn.lm, m.qIn.host, m.qIn.ox, m.qIn.oy] : undefined })), it: F.items.map(i => [i.id, i.n, +i.x.toFixed(3), i.y]) }; }
 export function loadFactory(o) {
   F.machines.length = 0; F.items.length = 0; F.cells.clear(); F.pad = F.printer = null; if (!o) return;
-  for (const q of o.m) { const d = DEFS[q.k], m = { kind: q.k, x: q.x, y: q.y, w: d.w, h: d.h, dir: q.d, inp: q.i || {}, out: q.o || {}, t: q.t || 0, on: false, n: q.n || 0, hp: q.hp, seed: (q.x * 7.3 + q.y * 3.1) % 100, nt: 0.3, recipe: q.r, depth: q.dp, drones: q.dr, busy: !!q.b, decon: !!q.dc, auto: !!q.a };
-    if (q.inv) m.inv = inv.load(makeInv(24), q.inv); for (let i = 0; i < d.w; i++) for (let j = 0; j < d.h; j++) F.cells.set(key(q.x + i, q.y + j), m); if (q.k === 'pad') F.pad = m; if (q.k === 'bio-printer') F.printer = m; F.machines.push(m); }
-  for (const [id, n, x, y] of o.it) F.items.push({ id, n, x, y });
+  for (const q of o.m) { const d = DEFS[q.k]; if (!d) continue; for (const src of [q.i, q.o]) for (const k in src || {}) if (!ITEMS[k]) delete src[k]; const m = { kind: q.k, x: q.x, y: q.y, w: d.w, h: d.h, dir: q.d, inp: q.i || {}, out: q.o || {}, t: q.t || 0, on: false, n: q.n || 0, hp: q.hp, seed: (q.x * 7.3 + q.y * 3.1) % 100, nt: 0.3, recipe: q.r, depth: q.dp, drones: q.dr, busy: !!q.b, decon: !!q.dc, auto: !!q.a };
+    if (q.inv) m.inv = inv.load(makeInv(24), q.inv); for (let i = 0; i < d.w; i++) for (let j = 0; j < d.h; j++) F.cells.set(key(q.x + i, q.y + j), m); if (q.k === 'pad') F.pad = m; if (q.k === 'bio-printer') F.printer = m; if (q.x6) { m.target = q.x6.tg; m.head = q.x6.hd; m.hoist = !!q.x6.hs; m.branches = q.x6.br || []; m.paid = q.x6.paid || 0; } if (q.q) m.q = { fe: q.q[0], cu: q.q[1], lm: q.q[2], host: q.q[3] }; if (q.qi) m.qIn = { fe: q.qi[0], cu: q.qi[1], lm: q.qi[2], host: q.qi[3], ox: q.qi[4], oy: q.qi[5] }; if (m.recipe && !RECIPE[m.recipe]) m.recipe = 'part'; F.machines.push(m); }
+  for (const [id, n, x, y] of o.it) if (ITEMS[id]) F.items.push({ id, n, x, y });
 }
 export { RECIPES };

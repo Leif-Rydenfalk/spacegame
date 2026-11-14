@@ -5,7 +5,7 @@ export const G = {
   act: q.get('act') === 'space' ? 'space' : 'surface',
   scenario: q.get('scenario') || '',
   auto: q.get('auto') === '1', test: q.get('test') === '1', prewarm: parseFloat(q.get('t') || '0') || 0,
-  time: 0, real: 0, frame: 0, paused: false,
+  time: 0, real: 0, frame: 0, paused: false, warp: 1,
   playerId: 'local-player', // demo 1: local id. Final architecture: the ce-net identity that owns the ships.
   w: 1, h: 1, shake: 0, exposure: 1,
 };
