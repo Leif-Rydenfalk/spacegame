@@ -4,9 +4,12 @@ import { makeInv, inv, CARRY, ITEMS } from '../items.js';
 export const S = {
   batch: null, parts: new Particles(7000), cam: { x: 0, y: 2 }, ppm: 60, zoom: 1, zo: 1, zoT: 1, far: 0, lod: 0, mouse: { x: 0, y: 0 },
   inv: makeInv(36), printer: { q: [], stall: '' }, bullets: [], decals: [], lights: [], P: null, calm: 0, corpse: null, flash: 0,
-  mode: 'build', uiOpen: false, msg: '', msgT: 0, stats: { kills: {}, dug: 0, vapor: 0, shots: 0 }, open: null,
+  // mode: 'build' is the normal mode (place what you hold), 'blueprint' is planning (Tab), 'combat' (C). plan = the kind
+  // picked to plan with; tool = 'clear' while dragging ground for the robots to cut; known = every item that has been in
+  // your hands or the base's stores, which is what decides the recipes you are shown
+  mode: 'build', plan: null, tool: null, known: new Set(), uiOpen: false, msg: '', msgT: 0, stats: { kills: {}, dug: 0, vapor: 0, shots: 0 }, open: null,
   // amounts are floats; add returns what did not fit (slot space or the suit's carry limit)
-  add(k, n = 1) { return inv.add(this.inv, k, n, CARRY - inv.mass(this.inv) + (ITEMS[k].u === 'ea' ? 1e9 : 0)); },
+  add(k, n = 1) { if (n > 0 && ITEMS[k]) this.known.add(k); return inv.add(this.inv, k, n, CARRY - inv.mass(this.inv) + (ITEMS[k].u === 'ea' ? 1e9 : 0)); },
   count(k) { return inv.count(this.inv, k); },
   has(cost) { return inv.has(this.inv, cost); },
   pay(cost) { return inv.pay(this.inv, cost); },
@@ -21,3 +24,5 @@ export const C = {   // linear colours
 };
 export const mul = (c, k) => [c[0] * k, c[1] * k, c[2] * k];
 export const mix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+// a recipe is shown once every input of it is known (or you hold what it makes)
+export const canSee = r => Object.keys(r.in).every(k => S.known.has(k)) || Object.keys(r.out).some(k => S.known.has(k) && ITEMS[k].build);

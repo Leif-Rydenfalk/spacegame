@@ -1,5 +1,5 @@
 // in-page property tests (?test=1). Prints "tests ok N" or the failures.
-import { rng, TAU } from './core.js';
+import { rng, TAU, input } from './core.js';
 import { elFromState, stateFromEl, energy, hohmannTime, G0 } from './space/orbit.js';
 import { makeShip, BP, stepShip, split, recalc, islands, growHive } from './space/ship.js';
 import { leadTime } from './space/combat.js';
@@ -7,11 +7,13 @@ import { genSector } from './space/belt.js';
 import { propagate } from './surface/light.js';
 import { world, M, MAT, CELL } from './surface/world.js';
 import { G } from './core.js';
-import { S } from './surface/state.js';
-import { P, stepPlayer, fire, WEAPON } from './surface/player.js';
+import { S, canSee } from './surface/state.js';
+import { P, stepPlayer, fire, WEAPON, bodyDepth } from './surface/player.js';
 import { ITEMS, makeInv, inv, printerQueue, printerStep, printerCancel, RECIPE, SUIT_SLOW, PRINT_W } from './items.js';
-import { assignJobs, robots, stepRobots, wakeShipRobots, ROBOT } from './surface/robots.js';
-import { matter } from './surface/matter.js';
+import { assignJobs, robots, stepRobots, wakeShipRobots, ROBOT, intentOf } from './surface/robots.js';
+import { findPath } from './surface/nav.js';
+import { PL, addPlat, platAt } from './surface/layers.js';
+import { matter, fracSpeed } from './surface/matter.js';
 import { heat } from './surface/heat.js';
 import { K, SHIP, fireBeam, flushPend, stepKit, kitReset } from './surface/kit.js';
 import { powerBudget, linked, mobility, REACTOR_W, LASER_W, SUIT_BUS_W, CHARGE_W, MIN_FRAC, REACTOR_KG, LASER_KG } from './surface/power.js';
@@ -22,7 +24,7 @@ import { planet } from './surface/planet.js';
 import { queueOrder, bump, planAll, chooseRoute } from './surface/auto.js';
 import { BP as SBP } from './surface/blueprint.js';
 import { place, stepFactory, F } from './surface/factory.js';
-import { addGhost } from './surface/blueprint.js';
+import { addGhost, tryPlace, cursorKind, unlocked, plannable } from './surface/blueprint.js';
 import { save, memAdapter } from './save.js';
 import { env } from './surface/env.js';
 import { waveOf, waveEvery } from './surface/hive.js';
@@ -143,9 +145,11 @@ export async function runTests() {
     // through the running AI: ore in the suit, none in the hold, and a link: the ship's fabricator has the order and the
     // arm, which holds the ore, gets the job; a furnace stands: the furnace gets it
     save.apply({ version: 3, data: d0 }); S.crash = true; kitReset('carried'); F.machines.length = 0; F.cells.clear(); matter.list.length = 0; robots.length = 0; S.inv.slots.fill(null); S.printer.q.length = 0; K.hold.slots.fill(null); P.x = SHIP.x + 3; P.y = 0.1; P.dead = 0; SUP.on = true; SUP.targets = { iron: 30 }; inv.add(S.inv, 'iron ore', 20);
-    stepKit(1 / 60); SUP.tick = 0; stepSupply(1); const q1 = S.printer.q.map(j => j.r).join(), o1 = SUP.orders[0] && SUP.orders[0].producer;
+    stepKit(1 / 60); SUP.tick = 0; stepSupply(1); const q0 = S.printer.q.length, o1 = SUP.orders[0] && SUP.orders[0].producer;
+    // what the suit holds is the player's: for a stock target the AI leaves it alone; for something the player planned it uses the arm
+    SBP.ghosts.length = 0; inv.add(S.inv, 'iron', 6); addGhost('chest', 60, 0); SUP.tick = 0; stepSupply(1); const q1 = S.printer.q.map(j => j.r).join(); SBP.ghosts.length = 0; inv.take(S.inv, 'iron', 99);
     S.printer.q.length = 0; const fu = place('furnace', -30, 0, 1, true); SUP.tick = 0; stepSupply(1); const o2 = SUP.orders[0];
-    ok('the AI queues the right producer', q1 === 'iron' && o1 === 'ship' && o2.producer === 'furnace' && o2.machine === fu && S.printer.q.length === 0, `${q1} ${o1} then ${o2 && o2.producer}`); SUP.targets = { ...TARGETS0 }; }
+    ok('the AI queues the right producer', q0 === 0 && q1 === 'chest' && o1 === 'ship' && o2.producer === 'furnace' && o2.machine === fu && S.printer.q.length === 0, `${q0} ${q1} ${o1} then ${o2 && o2.producer}`); SUP.targets = { ...TARGETS0 }; }
   // 21 wary or predator: nothing is hostile by default; what is bigger than you and eats meat hunts you
   { const far = { dist: 40, hurt: false, cornered: false, noise: 0, order: null, hp: 1 }, at = (d, o) => ({ ...far, dist: d, ...o }), st = KIND.strider, sk = KIND.stalker, sc = KIND.scout;
     ok('the herd is wary', stance(st, far) === 'ignore' && stance(st, at(12)) === 'watch' && stance(st, at(6)) === 'flee' && stance(st, at(30, { noise: 20 })) === 'flee' && stance(st, at(1.5, { hurt: true })) === 'defend' && stance(st, at(9, { hurt: true })) === 'flee' && stance(st, at(1.5, { cornered: true })) === 'defend' && stance(KIND.calf, at(1, { hurt: true })) === 'flee');
@@ -193,7 +197,75 @@ export async function runTests() {
   { const base = { dist: 5, rise: 0, rate: 0.62, robots: 2, blocked: 0, danger: 0, powerFree: 20000 }, R = q => chooseRoute({ ...base, ...q }), a = R({}), far = R({ dist: 60 }), hill = R({ rise: 1.5 }), rock = R({ blocked: 3 }), hv = R({ danger: 1 }), thin = R({ dist: 30, rate: 0.05 }), busy = R({ dist: 30, rate: 6 }), none = R({ robots: 0, dist: 30 }), dark = R({ powerFree: 100 }), idle = R({ rate: 0 });
     ok('a short steady flow on level ground gets a belt', a.mode === 'belt' && a.cells === 10 && Math.abs(a.iron - 7.5) < 1e-9 && a.beltRate > a.robotRate * 0.5 && busy.mode === 'belt' && none.mode === 'belt', JSON.stringify([a.mode, a.why, busy.why]));
     ok('robots carry what a belt is not worth, or cannot reach', far.mode === 'robot' && hill.mode === 'robot' && rock.mode === 'robot' && hv.mode === 'robot' && thin.mode === 'robot' && dark.mode === 'robot' && idle.mode === 'none' && [far, hill, rock, hv, thin, dark].every(q => q.why.length > 20) && new Set([far, hill, rock, hv, thin, dark].map(q => q.why)).size === 6 && far.trip > a.trip * 4 && far.robotRate < a.robotRate / 4, JSON.stringify([far.why, thin.why])); }
-  save.apply({ version: 3, data: d0 }); S.crash = undefined;
+  // ---- round 5 -------------------------------------------------------------------------------------------------------
+  const reset5 = () => { save.apply({ version: 3, data: d0 }); S.crash = true; kitReset('carried'); F.machines.length = 0; F.cells.clear(); SBP.ghosts.length = 0; SBP.clears.length = 0; matter.list.length = 0; robots.length = 0; S.inv.slots.fill(null); S.printer.q.length = 0; K.hold.slots.fill(null); K.fab = null; PL.cells.clear(); S.mode = 'build'; S.plan = null; S.tool = null; P.dead = 0; P.hp = 100; P.vx = P.vy = 0; P.stumble = 0; P.act = null; S.uiOpen = false; input.keys.clear(); input.down = [false, false, false]; SUP.on = true; SUP.targets = {}; SUP.orders = []; };
+  // 28 after an edit the field is a distance field again, and the mass in it has not changed
+  { reset5(); const x = 300, y = 40; world.box(x - 6, y - 3, x + 6, y, 1, M.BASALT); const m0 = world.mass(x - 8, y - 5, x + 8, y + 8)[M.BASALT]; let worst = 0; for (const h of [0.1, 0.2, 0.3, 0.4]) worst = Math.max(worst, Math.abs(world.dist(x + 0.03, y + h) - h), Math.abs(world.dist(x + 0.03, y - h) + h));
+    const acc = {}; world.dig(x, y, 1, 0, acc); let w2 = 0; for (const r of [0.6, 0.8, 1.2, 1.4]) w2 = Math.max(w2, Math.abs(world.dist(x + r * 0.6, y - r * 0.8) - (1 - r))); const m1 = world.mass(x - 8, y - 5, x + 8, y + 8)[M.BASALT];
+    ok('the field is a distance again after an edit, and the edit alone changed the mass', worst < 0.03 && w2 < 0.04 && Math.abs(m0 - m1 - acc[M.BASALT]) < 1e-6 && acc[M.BASALT] > 50, `floor ${worst.toFixed(3)} hole ${w2.toFixed(3)} mass ${(m0 - m1).toFixed(3)} dug ${acc[M.BASALT].toFixed(3)}`); }
+  // 29 the body is never carried through the ground: terminal velocity onto a floor half a metre thick, sideways at 60 m/s
+  //    into a wall half a metre thick, terminal velocity onto a deck, and straight down onto ground that was just dug
+  { reset5(); const x = 340, y = 60; world.box(x - 5, y - 0.5, x + 5, y, 1, M.BASALT); world.box(x + 3, y, x + 3.5, y + 4, 1, M.BASALT); let info = '';
+    const run = (px, py, vx, vy, n, each) => { P.x = px; P.y = py; P.vx = vx; P.vy = vy; P.ground = false; P.hp = 1e9; let deep = 0; for (let i = 0; i < n; i++) { stepPlayer(1 / 120); deep = Math.max(deep, bodyDepth()); if (each) each(i); } P.hp = 100; P.stumble = 0; return deep; };
+    const d1 = run(x - 2, y + 30, 0, -60, 240), a = [P.y, P.ground]; info += `floor y ${(P.y - y).toFixed(3)} deep ${d1.toFixed(3)}; `;
+    const d2 = run(x - 2, y + 0.02, 60, 0, 120), b = [P.x, P.y]; info += `wall x ${(P.x - x).toFixed(2)} deep ${d2.toFixed(3)}; `;
+    for (let gx = Math.floor((x - 10) / 0.5); gx < Math.floor((x - 7) / 0.5); gx++) addPlat(gx, Math.round((y + 6) / 0.5) - 1);
+    const d3 = run(x - 8.5, y + 40, 0, -60, 240), c = [P.y, P.onDeck, P.ground]; info += `deck y ${(P.y - y - 6).toFixed(3)}; `;
+    input.keys.add('s'); for (let i = 0; i < 30; i++) stepPlayer(1 / 120); input.keys.delete('s'); const dropped = P.y < y + 5.9;
+    world.dig(x - 2, y + 0.2, 0.5, 0); const d4 = run(x - 2, y + 25, 0, -60, 300), e = [P.y, P.ground]; info += `dug y ${(P.y - y).toFixed(2)} deep ${d4.toFixed(3)}`;
+    ok('no tunnelling at terminal velocity', a[1] && Math.abs(a[0] - y) < 0.06 && d1 < 0.16 && b[0] < x + 3 && b[0] > x + 2.5 && d2 < 0.16 && c[1] && c[2] && Math.abs(c[0] - y - 6) < 1e-6 && dropped && e[1] && e[0] < y - 0.2 && e[0] > y - 0.36 && d4 < 0.16 && bodyDepth() < 0.03, info); PL.cells.clear(); }
+  // 30 a pile of rock comes to rest: sixty bodies dropped on a floor are all asleep within ten seconds, none in the
+  //    ground, none spinning, and the amounts are what was dropped
+  { reset5(); const x = 380, y = 30; world.box(x - 9, y - 2, x + 9, y, 1, M.BASALT); world.box(x - 9, y, x - 8, y + 5, 1, M.BASALT); world.box(x + 8, y, x + 9, y + 5, 1, M.BASALT); const rr = rng(77); let n0 = 0;
+    for (let i = 0; i < 60; i++) { const n = 3 + rr() * 25; n0 += n; matter.spawn(i % 4 ? 'basalt' : 'iron ore', n, x - 2 + rr() * 4, y + 1.5 + i * 0.35, rr() - 0.5, 0); }
+    let t = 0, worstV = 0; while (t < 10 && (matter.awake > 0 || t < 0.1)) { matter.step(1 / 120); t += 1 / 120; if (t > 6) for (const c of matter.list) if (!c.asleep) worstV = Math.max(worstV, Math.hypot(c.vx, c.vy)); }
+    const n1 = matter.list.reduce((q, c) => q + c.n, 0), inRock = matter.list.filter(c => world.dens(c.x, c.y) > 0.08).length, out = matter.list.filter(c => c.x < x - 8 || c.x > x + 8 || c.y < y).length;
+    ok('a rock stack comes to rest', matter.awake === 0 && t < 10 && inRock === 0 && out === 0 && Math.abs(n1 - n0) < 1e-6 && matter.list.every(c => c.asleep && c.vx === 0 && c.av === 0), `${matter.list.length} bodies asleep after ${t.toFixed(1)} s, ${inRock} in rock, ${out} out, late speed ${worstV.toFixed(2)}`);
+    // what leans on something that is taken away falls: take the lowest body, and the pile wakes and settles again
+    const low = matter.list.reduce((q, c) => c.y < q.y ? c : q, matter.list[0]), tot = matter.total(); matter.take(low, low.n); const woke = matter.list.some(c => !c.asleep); let t2 = 0; do { matter.step(1 / 120); t2 += 1 / 120; } while (t2 < 10 && matter.awake > 0);
+    ok('a pile wakes when its support is taken and settles again', woke && matter.awake === 0 && Math.abs(matter.total() - tot + low.kg) < 1e-6 + tot, `${t2.toFixed(1)} s`); matter.list.length = 0; }
+  // 31 fracture: a split rock is smaller rocks whose amounts add up to the parent's exactly; a hard landing breaks rock,
+  //    a kit or a lump of biomass never breaks
+  { reset5(); const x = 420, y = 30; world.box(x - 16, y - 2, x + 16, y, 1, M.BASALT); const c = matter.spawn('basalt', 40, x, y + 2), made = matter.made, parts = matter.fracture(c, 3), sum = parts.reduce((q, p) => q + p.n, 0), made2 = matter.made;
+    const kit = matter.spawn('furnace', 1, x + 2, y + 2), bio = matter.spawn('biomass', 30, x - 2, y + 2);
+    ok('fracture conserves mass', parts.length === 3 && Math.abs(sum - 40) < 1e-9 && Math.abs(matter.total('basalt') - 40) < 1e-9 && Math.abs(made2 - made) < 1e-9 && c.gone && parts.every(p => p.n > 1 && p.hw > 0.02 && p.hh > 0.02) && matter.fracture(kit).length === 0 && matter.fracture(bio).length === 0 && fracSpeed(40) < fracSpeed(4), `${parts.map(p => p.n.toFixed(2)).join(' + ')} = ${sum}`);
+    matter.list.length = 0; const big = matter.spawn('basalt', 60, x, y + 25, 0, 0); matter.spawn('furnace', 1, x + 3, y + 25); const b0 = matter.breaks; for (let i = 0; i < 120 * 8; i++) matter.step(1 / 120);
+    ok('a hard landing breaks rock and loses none of it', matter.breaks > b0 && matter.list.filter(q => q.id === 'basalt').length >= 2 && Math.abs(matter.total('basalt') - 60) < 1e-9 && matter.list.filter(q => q.id === 'furnace').length === 1 && matter.awake === 0, `${matter.list.map(q => q.id + ' ' + q.n.toFixed(2) + (q.asleep ? '' : ' awake v ' + Math.hypot(q.vx, q.vy).toFixed(2) + ' av ' + q.av.toFixed(2) + ' touch ' + q.touch)).join(', ')}, ${matter.breaks - b0} breaks`); matter.list.length = 0; }
+  // 32 a robot's job completes: one kit in the hold, two frames, two drones. One drone fetches it (the other is not sent
+  //    for the same kit), carries it, builds, and comes home; the second frame waits and says why
+  { reset5(); world.box(-30, 0, 30, 12, -1); world.box(-30, -2, 30, 0, 1, M.BASALT); place('antenna', 4, 0, 1, true); K.awake = false; wakeShipRobots(2); P.x = 6; P.y = 0.05; SUP.on = false; inv.add(K.hold, 'chest', 1);
+    const g1 = addGhost('chest', 12, 0), g2 = addGhost('chest', 18, 0); stepKit(1 / 60); let t = 0, fetchers = 0, states = new Set();
+    while (t < 60 && F.machines.filter(m => m.kind === 'chest').length < 1) { stepRobots(1 / 60); t += 1 / 60; fetchers = Math.max(fetchers, robots.filter(r => r.state === 'fetch').length); for (const r of robots) if (r.kind !== 'crawler') states.add(r.state); }
+    for (let i = 0; i < 60 * 8; i++) stepRobots(1 / 60);
+    ok('a robot job completes', F.machines.filter(m => m.kind === 'chest').length === 1 && fetchers === 1 && ['fetch', 'go', 'work', 'idle'].every(q => states.has(q)) && inv.count(K.hold, 'chest') === 0 && SBP.ghosts.length === 1 && !SBP.ghosts[0].claim && robots.every(r => r.state === 'idle' && !r.job && !r.gave && !r.carry) && typeof intentOf(robots[0]) === 'string', `${t.toFixed(1)} s, most fetching at once ${fetchers}, states ${[...states].join()}`);
+    // a drone finds its way round rock: a wall seven metres high between the hold and the next frame, and it still gets built
+    world.box(14, 0, 15, 7, 1, M.BASALT); SBP.ghosts.length = 0; const g3 = addGhost('chest', 40, 0); inv.add(K.hold, 'chest', 1); let t3 = 0, top = 0, inRock = 0;
+    while (t3 < 90 && F.machines.filter(m => m.kind === 'chest').length < 2) { stepRobots(1 / 60); t3 += 1 / 60; for (const r of robots) if (r.kind !== 'crawler') { top = Math.max(top, r.y); if (world.dens(r.x, r.y) > 0) inRock++; } }
+    ok('a robot goes round what is in the way', F.machines.some(m => m.kind === 'chest' && m.x === 40) && top > 7 && inRock === 0 && robots.every(r => !r.gave), `${t3.toFixed(1)} s, highest ${top.toFixed(1)} m, ${inRock} steps in rock, ${robots.map(r => r.state + (r.gave ? ' gave up ' + r.gave : '')).join()}`);
+    // the planner itself: over the wall; and into a sealed chamber there is no way
+    world.box(-24, 0, -18, 6, 1, M.BASALT); world.box(-22.5, 1.5, -19.5, 4.5, -1); const pth = findPath(10, 1, 19, 1), none = findPath(-10, 1, -21, 3);
+    ok('the path goes over the wall, and no way is no way', !!pth && pth.some(q => q[1] > 7) && pth.every(q => world.dens(q[0], q[1]) < 0) && none === null, pth ? `${pth.length} steps` : 'none'); robots.length = 0; matter.list.length = 0; }
+  // 33 the inventory is what you place from: a furnace in a slot goes down and the item is gone; with none, nothing goes
+  //    down in normal mode and a ghost goes down in blueprint mode; over its own ghost the item builds it
+  { reset5(); world.box(-30, 0, 30, 12, -1); world.box(-30, -2, 30, 0, 1, M.BASALT); P.x = 0; P.y = 0.05; S.add('furnace', 1); S.add('belt', 3); P.slot = S.inv.slots.findIndex(q => q && q.id === 'furnace'); const cur = cursorKind();
+    const r1 = tryPlace('furnace', 4, 0, false), n1 = [S.count('furnace'), F.machines.filter(m => m.kind === 'furnace').length], cur2 = cursorKind(), r2 = tryPlace('furnace', 8, 0, false), n2 = [F.machines.length, SBP.ghosts.length];
+    ok('inventory place consumes the item', cur === 'furnace' && r1 === 'placed' && n1[0] === 0 && n1[1] === 1 && cur2 === null && r2 === null && n2[0] === 1 && n2[1] === 0 && tryPlace('belt', 4, 0, false) === null && S.count('belt') === 3, JSON.stringify([cur, r1, n1, r2, n2]));
+    S.mode = 'blueprint'; S.plan = 'furnace'; const r3 = tryPlace('furnace', 8, 0, false), far = tryPlace('belt', 50, 0, false), n3 = [SBP.ghosts.map(g => g.kind).join(), S.count('belt')]; S.plan = 'belt'; const r4 = tryPlace('belt', 12, 0, false); S.add('furnace', 1); const r5 = tryPlace('furnace', 8, 0, false);
+    ok('blueprint mode places what you hold and plans what you do not', r3 === 'ghost' && far === 'ghost' && n3[0] === 'furnace,belt' && n3[1] === 3 && r4 === 'placed' && S.count('belt') === 2 && r5 === 'placed' && S.count('furnace') === 0 && F.machines.filter(m => m.kind === 'furnace').length === 2 && SBP.ghosts.length === 1, JSON.stringify([r3, far, n3, r4, r5]));
+    // only what can be made yet is offered
+    S.known = new Set(['iron', 'copper']); const v1 = [canSee(RECIPE.chest), canSee(RECIPE.furnace), canSee(RECIPE.hub), unlocked('furnace'), unlocked('wall'), plannable().includes('hub')]; S.add('basalt', 1); const v2 = [canSee(RECIPE.furnace), unlocked('furnace')];
+    ok('what cannot be made yet is not shown', v1.join() === 'true,false,false,false,true,false' && v2.join() === 'true,true', v1.join() + ' ' + v2.join()); S.mode = 'build'; S.plan = null; }
+  // 34 a ghost gets built: planned with nothing in the suit, iron in the hold. The fabricator makes the chest, a drone
+  //    fetches it from the hold, carries it and builds it. Then a deck, the same way.
+  { reset5(); world.box(-30, 0, 30, 12, -1); world.box(-30, -2, 30, 0, 1, M.BASALT); place('antenna', 4, 0, 1, true); K.awake = false; wakeShipRobots(1); P.x = 6; P.y = 0.05; inv.add(K.hold, 'iron', 10); stepKit(1 / 60);
+    S.mode = 'blueprint'; S.plan = 'chest'; const r = tryPlace('chest', 20, 0, false); S.plan = 'platform'; const rp = tryPlace('platform', 30, 4, false), rq = tryPlace('platform', 26, 0, false); S.mode = 'build'; S.plan = null; let t = 0, fab = '';
+    while (t < 120 && (!F.machines.some(m => m.kind === 'chest') || !PL.cells.size)) { stepRobots(1 / 60); stepSupply(1 / 60); if (K.fab) fab = K.fab.r; t += 1 / 60; }
+    ok('a blueprint ghost gets built', r === 'ghost' && rp === null && rq === 'ghost' && F.machines.some(m => m.kind === 'chest' && m.x === 20) && platAt(26, 0) && SBP.ghosts.length === 0 && S.count('chest') === 0 && Math.abs(inv.count(K.hold, 'iron') - 2) < 1e-6 && inv.count(K.hold, 'platform') === 3, `${t.toFixed(1)} s, hold iron ${inv.count(K.hold, 'iron')}, platforms ${inv.count(K.hold, 'platform')}`); robots.length = 0; }
+  // 35 a version 4 save loads: no decks, the items it holds are known, loose bodies get a shape and keep their place and amount
+  { reset5(); S.add('iron', 5); inv.add(K.hold, 'basalt', 9); matter.spawn('iron ore', 7.5, 20, 3); addPlat(3, 3); S.mode = 'blueprint'; const b = JSON.parse(JSON.stringify(save.blob())), so = b.data.parts.surface; b.version = 4; delete so.known; delete so.plats; so.matter = so.matter.map(q => q.slice(0, 5));
+    matter.list.length = 0; S.inv.slots.fill(null); save.apply(b); const c = matter.list[0];
+    ok('save migration 4 to 5', save.migrate(JSON.parse(JSON.stringify(b))).version === 5 && PL.cells.size === 0 && S.known.has('iron') && S.known.has('basalt') && S.known.has('iron ore') && S.mode === 'build' && S.count('iron') === 5 && matter.list.length === 1 && Math.abs(c.n - 7.5) < 1e-9 && c.x === 20 && c.y === 3 && c.hw > 0 && c.cut.length === 4 && save.hash(save.collect()) === save.hash(save.collect()), `${S.mode} ${[...S.known].join()}`); matter.list.length = 0; }
+  save.apply({ version: 3, data: d0 }); S.crash = undefined; robots.length = 0; matter.list.length = 0;
   const msg = fails.length ? `tests FAIL ${fails.length}/${n}: ${fails.join('; ')}` : `tests ok ${n}`;
   console.log(msg); window.__tests = msg;
   const d = document.createElement('div'); d.style.cssText = 'position:fixed;left:24px;bottom:184px;font:11px ui-monospace,monospace;color:#9fb3bf;letter-spacing:.08em;text-transform:uppercase'; d.textContent = msg; document.body.appendChild(d);

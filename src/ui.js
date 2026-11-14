@@ -4,12 +4,12 @@
 import { G, events } from './core.js';
 import { iconUrl } from './icons.js';
 import { ITEMS, RECIPES, RECIPE, SUIT_SLOW, CARRY, EPS, inv, fmtAmt, fmtCost, printerQueue, printerCancel } from './items.js';
-import { S } from './surface/state.js';
+import { S, canSee } from './surface/state.js';
 import { F, DEFS, give, accepts, quickTransfer, ROCKET_PARTS } from './surface/factory.js';
-import { BP, BUILD, costOf, cancelGhost } from './surface/blueprint.js';
+import { BP, costOf, cancelGhost, plannable, cursorKind, setBlueprint } from './surface/blueprint.js';
 import { SUP, setTarget, targetStep } from './surface/supply.js';
 import { AUTO, queueView, bump, AUX_W } from './surface/auto.js';
-import { robots, ROBOT, CRAWLER } from './surface/robots.js';
+import { robots, ROBOT, CRAWLER, intentOf } from './surface/robots.js';
 import { STORY } from './story.js';
 
 const CSS = `
@@ -38,17 +38,21 @@ const CSS = `
 .qr .qw{flex:1;color:rgba(159,179,191,.6);overflow:hidden;text-overflow:ellipsis;min-width:250px;max-width:430px} .qr .qw.warn{color:rgba(255,179,71,.85)} .qr .qv{width:120px;text-align:right;color:rgba(214,226,233,.85)}
 .qb{width:18px;height:18px;line-height:17px;text-align:center;border:1px solid rgba(159,179,191,.25);cursor:pointer;color:rgba(159,179,191,.8);flex:none;letter-spacing:0} .qb:hover{border-color:rgba(255,179,71,.8);color:rgba(255,179,71,.95)}
 .note{color:rgba(159,179,191,.38);margin-top:8px;max-width:640px;white-space:normal;line-height:1.6}
-#bpinfo{position:absolute;left:50%;bottom:80px;transform:translateX(-50%);white-space:nowrap;color:rgba(159,179,191,.6)}
+#bpinfo{position:absolute;left:50%;bottom:78px;transform:translateX(-50%);white-space:nowrap;color:rgba(159,179,191,.6)} #bpinfo b{font-weight:400;color:rgba(110,205,255,.95)}
+#plan{position:absolute;left:50%;bottom:142px;transform:translateX(-50%);display:none;gap:4px;pointer-events:auto;padding:5px;border:1px dashed rgba(110,205,255,.45);background:rgba(4,14,22,.6)}
+#plan .slot{width:44px;height:44px;border-color:rgba(110,205,255,.3);background-color:rgba(4,16,26,.8)} #plan .slot.sel{border-color:rgba(110,205,255,1);box-shadow:inset 0 0 0 1px rgba(110,205,255,.35)} #plan .slot.gh{filter:grayscale(1) brightness(1.2) sepia(1) hue-rotate(165deg) saturate(2.4);opacity:.85}
+#ui.bp .bar .slot{border-color:rgba(110,205,255,.28)}
+.slot.plan::after{content:'';position:absolute;right:2px;top:2px;width:6px;height:6px;border:1px dashed rgba(110,205,255,.9)}
 `;
-let root, bar, win, tip, heldEl, title, bpinfo, held = null, sig = '', downAt = null, mx = 0, my = 0;
+let root, bar, win, tip, heldEl, title, bpinfo, plan, held = null, sig = '', downAt = null, mx = 0, my = 0;
 const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html) e.innerHTML = html; return e; };
 const slotHtml = (s, a = '', extra = '') => `<div class="slot ${a}" ${extra} ${s ? `style="background-image:url(${iconUrl(s.id)})"` : ''}>${s ? `<span class="n">${fmtAmt(s.id, s.n)}</span>` : ''}`;
 export const ui = { open: false, ai: false,
   init() {
     const st = el('style'); st.textContent = CSS; document.head.appendChild(st);
     root = el('div'); root.id = 'ui'; document.body.appendChild(root);
-    bar = el('div', 'bar'); win = el('div'); win.id = 'win'; tip = el('div'); tip.id = 'tip'; heldEl = el('div'); heldEl.id = 'held'; title = el('div'); title.id = 'title'; bpinfo = el('div'); bpinfo.id = 'bpinfo';
-    root.append(bar, bpinfo, win, title, tip, heldEl);
+    bar = el('div', 'bar'); win = el('div'); win.id = 'win'; tip = el('div'); tip.id = 'tip'; heldEl = el('div'); heldEl.id = 'held'; title = el('div'); title.id = 'title'; bpinfo = el('div'); bpinfo.id = 'bpinfo'; plan = el('div'); plan.id = 'plan';
+    root.append(bar, plan, bpinfo, win, title, tip, heldEl);
     root.addEventListener('mousedown', e => { const t = e.target.closest('[data-a]'); if (!t) return; e.preventDefault(); act(t, e.button, e.shiftKey); downAt = t; events.emit('gesture'); });
     root.addEventListener('mouseup', e => { const t = e.target.closest('[data-a="slot"]'); if (t && downAt && t !== downAt && held && downAt.dataset.a === 'slot') act(t, 0, false); downAt = null; });
     root.addEventListener('contextmenu', e => e.preventDefault());
@@ -63,17 +67,18 @@ export const ui = { open: false, ai: false,
     root.style.display = visible ? 'block' : 'none'; if (!visible) return;
     if (S.uiOpen !== this.open) { this.open = S.uiOpen; sig = ''; }
     const P = S.P, bp = S.mode === 'blueprint', q = S.printer.q;
-    const s2 = JSON.stringify([S.inv.slots, P.slot, S.mode, this.open, S.open && [S.open.kind, S.open.inv && S.open.inv.slots, S.open.inp, S.open.out, S.open.recipe, S.open.n, S.open.drones], held, bp && [BP.sel, BP.tool, BP.rot], q.map(j => [j.r, Math.round(j.left)]), this.open && Math.round(inv.mass(S.inv)), this.open && [Math.round(P.bat.wh), Math.round(P.o2 * 100), Math.round(P.prop * 10)], this.ai && aiSig()]);
+    const s2 = JSON.stringify([S.inv.slots, P.slot, S.mode, this.open, S.open && [S.open.kind, S.open.inv && S.open.inv.slots, S.open.inp, S.open.out, S.open.recipe, S.open.n, S.open.drones], held, S.plan, S.tool, BP.rot, BP.ghosts.length, bp && plannable(), S.known.size, q.map(j => [j.r, Math.round(j.left)]), this.open && Math.round(inv.mass(S.inv)), this.open && [Math.round(P.bat.wh), Math.round(P.o2 * 100), Math.round(P.prop * 10)], this.ai && aiSig()]);
     if (s2 === sig) return; sig = s2;
-    // hotbar, or the blueprint bar
-    if (bp) {
-      const all = id => { let n = S.count(id); for (const m of F.machines) if (m.kind === 'chest') n += inv.count(m.inv, id); return n; };
-      bar.innerHTML = BUILD.map((k, i) => { const c = costOf(k), have = Object.keys(c).every(id => all(id) >= c[id]); return `<div class="slot ${i === BP.sel && BP.tool === 'place' ? 'sel' : ''} ${have ? '' : 'dim'}" data-a="bp" data-i="${i}" data-tip="${k}\ncost  ${fmtCost(c)}\nhave  ${Object.keys(c).map(id => fmtAmt(id, all(id)) || 'x' + all(id)).join(', ')} (suit and chests)${RECIPE[k] ? '\nkit   ' + fmtCost(RECIPE[k].in) : ''}" style="background-image:url(${iconUrl(k)})"><span class="k">${i + 1}</span><span class="n">${k === 'wall' ? '' : 'x' + Math.round(all(k))}</span></div>`; }).join('')
-        + `<div class="slot ${BP.tool === 'decon' ? 'sel' : ''}" data-a="tool" data-i="decon" data-tip="deconstruct (x)\nmark a machine; robots or the suit take it apart" style="background-image:url(${iconUrl('decon')})"><span class="k">x</span></div><div class="slot ${BP.tool === 'clear' ? 'sel' : ''}" data-a="tool" data-i="clear" data-tip="clear terrain (t)\ndrag a rectangle; robots cut it out" style="background-image:url(${iconUrl('clear')})"><span class="k">t</span></div>`;
-      const k = BUILD[BP.sel]; bpinfo.textContent = BP.tool === 'place' ? `blueprint: ${k}   cost ${fmtCost(costOf(k))}   lmb queue   rmb cancel   r rotate ${k === 'belt' ? (BP.rot > 0 ? '>' : '<') : ''}   queued ${BP.ghosts.length}` : BP.tool === 'decon' ? 'deconstruct: lmb mark a machine   rmb unmark' : 'clear terrain: drag a rectangle   rmb cancel';
-    } else {
-      bar.innerHTML = S.inv.slots.slice(0, 9).map((s, i) => slotHtml(s, i === P.slot ? 'sel' : '', `data-a="slot" data-c="p" data-i="${i}" ${s ? `data-tip="${tipOf(s)}"` : ''}`) + `<span class="k">${i + 1}</span></div>`).join(''); bpinfo.textContent = '';
-    }
+    // the hotbar is the same in both modes. In blueprint mode a dashed row above it lists what can be planned: the same
+    // items, whether you hold them or not; what you do not hold goes down as a ghost
+    root.className = bp ? 'bp' : '';
+    bar.innerHTML = S.inv.slots.slice(0, 9).map((s, i) => slotHtml(s, i === P.slot && !S.plan ? 'sel' : '', `data-a="slot" data-c="p" data-i="${i}" ${s ? `data-tip="${tipOf(s)}"` : ''}`) + `<span class="k">${i + 1}</span></div>`).join('');
+    const cur = S.mode === 'combat' ? null : cursorKind(), all = id => { let n = S.count(id); for (const m of F.machines) if (m.kind === 'chest') n += inv.count(m.inv, id); return n; };
+    plan.style.display = bp ? 'flex' : 'none';
+    if (bp) plan.innerHTML = plannable().map(k => { const c = costOf(k), n = k === 'wall' ? Math.floor(S.count('iron') / c.iron) : S.count(k); return `<div class="slot ${S.plan === k ? 'sel' : ''} ${n >= 1 ? '' : 'gh'}" data-a="plan" data-i="${k}" data-tip="${k}\n${n >= 1 ? 'you hold ' + n + ': the click places it' : 'you hold none: the click plans it, the ship ai has it made and built'}\ncost  ${fmtCost(c)}${RECIPE[k] ? '\nmade from  ' + fmtCost(RECIPE[k].in) : ''}" style="background-image:url(${iconUrl(k)})"><span class="n">${n >= 1 ? 'x' + n : ''}</span></div>`; }).join('')
+      + `<div class="slot ${S.tool === 'clear' ? 'sel' : ''}" data-a="tool" data-i="clear" data-tip="clear terrain (t)\ndrag a rectangle; robots cut it out" style="background-image:url(${iconUrl('clear')})"><span class="k">t</span></div>`;
+    bpinfo.innerHTML = bp ? `<b>blueprint mode</b> &nbsp; ${S.tool === 'clear' ? 'clear terrain: drag a rectangle &nbsp; rmb cancel' : cur ? `${cur}: ${S.has(costOf(cur)) ? 'lmb place' : 'lmb plan a ghost'} &nbsp; rmb take back &nbsp; r rotate${cur === 'belt' ? (BP.rot > 0 ? ' &gt;' : ' &lt;') : ''} &nbsp; q pipette` : 'pick from the row, a slot, or q over a machine'} &nbsp; queued ${BP.ghosts.length} &nbsp; tab leaves`
+      : cur ? `${cur}: lmb place &nbsp; r rotate${cur === 'belt' ? (BP.rot > 0 ? ' &gt;' : ' &lt;') : ''} &nbsp; q clear the cursor &nbsp; tab plans what you do not hold` : '';
     heldEl.style.display = held ? 'block' : 'none'; if (held) { heldEl.style.backgroundImage = `url(${iconUrl(held.id)})`; heldEl.innerHTML = `<span class="n">${fmtAmt(held.id, held.n)}</span>`; }
     win.style.display = this.open ? 'flex' : 'none'; win.className = this.ai ? 'ai' : ''; if (!this.open) return;
     if (this.ai) { win.innerHTML = aiPanels(); return; }
@@ -85,9 +90,9 @@ export const ui = { open: false, ai: false,
     h += `<div class="pan"><h4>suit inventory<b>${inv.mass(S.inv).toFixed(0)} / ${CARRY} kg</b></h4>${grid(S.inv, 'p', 9, 9)}<div class="sep"></div>${grid(S.inv, 'p', 9, 0, 9)}<div class="sep"></div>
       <div class="row"><span>battery</span><b>${P.bat.wh.toFixed(0)} / ${P.bat.cap} Wh</b></div><div class="row"><span>oxygen</span><b>${P.o2.toFixed(2)} kg</b></div><div class="row"><span>jet propellant</span><b>${P.prop.toFixed(1)} kg</b></div>
       <div class="row" style="margin-top:6px;color:rgba(159,179,191,.35)"><span>lmb move &nbsp; rmb split / place one &nbsp; shift quick move</span></div></div>`;
-    h += `<div class="pan"><h4>the arm: matter compiler<b>${q.length ? (S.printer.stall || 'printing') : 'idle'}</b></h4><div class="grid g6">` + RECIPES.map(r => { const ok = S.has(r.in), out = Object.keys(r.out)[0]; return `<div class="slot ${ok ? '' : 'dim'}" data-a="print" data-i="${r.id}" data-tip="${recipeTip(r)}" style="background-image:url(${iconUrl(out)})"></div>`; }).join('') + '</div>'
+    h += `<div class="pan"><h4>craft: the arm<b>${q.length ? (S.printer.stall || 'printing') : 'idle'}</b></h4><div class="grid g6">` + RECIPES.filter(canSee).map(r => { const ok = S.has(r.in), out = Object.keys(r.out)[0]; return `<div class="slot ${ok ? '' : 'dim'} ${ITEMS[out].build ? 'plan' : ''}" data-a="print" data-i="${r.id}" data-tip="${recipeTip(r)}" style="background-image:url(${iconUrl(out)})"></div>`; }).join('') + '</div>'
       + `<div class="sep"></div><h4>queue<b>${q.length} / 12</b></h4><div class="grid g6" style="min-height:52px">` + q.map((j, i) => `<div class="slot" data-a="unprint" data-i="${i}" data-tip="${j.r}\n${Math.ceil(j.left)} s left\nclick to cancel: the material comes back" style="background-image:url(${iconUrl(Object.keys(RECIPE[j.r].out)[0])})"><span class="pg"><i style="width:${(100 * (1 - j.left / j.total)).toFixed(0)}%"></i></span></div>`).join('') + `</div>
-      <div class="row" style="margin-top:6px;color:rgba(159,179,191,.35)"><span>prints anything, ${SUIT_SLOW}x slower than a machine &nbsp; shift x5</span></div></div>`;
+      <div class="row" style="margin-top:6px;color:rgba(159,179,191,.35)"><span>lmb craft into the inventory, ${SUIT_SLOW}x slower than a machine &nbsp; shift x5 &nbsp; rmb plan it as a blueprint</span></div></div>`;
     win.innerHTML = h;
   },
   // title screen: resolves with 'continue' or 'new'
@@ -100,8 +105,8 @@ export const ui = { open: false, ai: false,
     });
   },
 };
-const tipOf = s => { const d = ITEMS[s.id]; return `${s.id}\n${fmtAmt(s.id, s.n) || 'x1'}   ${(s.n * d.m).toFixed(d.m * s.n < 10 ? 2 : 1)} kg${d.build ? '\nplace it in blueprint mode (b)' : d.place ? '\nrmb places it as terrain' : d.weapon ? '\nc combat mode' : ''}`; };
-const recipeTip = r => `${r.id}\nmakes  ${fmtCost(r.out)}\nneeds  ${Object.entries(r.in).map(([k, n]) => `${k} ${fmtAmt(k, n) || 'x1'} (have ${fmtAmt(k, S.count(k)) || 'x' + Math.round(S.count(k))})`).join('\n       ')}\nsuit   ${(r.t * SUIT_SLOW).toFixed(0)} s\n${r.by}  ${r.t} s`;
+const tipOf = s => { const d = ITEMS[s.id]; return `${s.id}\n${fmtAmt(s.id, s.n) || 'x1'}   ${(s.n * d.m).toFixed(d.m * s.n < 10 ? 2 : 1)} kg${d.build ? '\nselect its slot, then lmb places it' : d.place ? '\nrmb places it as terrain' : d.weapon ? '\nc combat mode' : ''}`; };
+const recipeTip = r => `${r.id}${ITEMS[Object.keys(r.out)[0]].build ? '   (placeable)' : ''}\nmakes  ${fmtCost(r.out)}\nneeds  ${Object.entries(r.in).map(([k, n]) => `${k} ${fmtAmt(k, n) || 'x1'} (have ${fmtAmt(k, S.count(k)) || 'x' + Math.round(S.count(k))})`).join('\n       ')}\nsuit   ${(r.t * SUIT_SLOW).toFixed(0)} s\n${r.by}  ${r.t} s`;
 function machinePanel(m) {
   const rows = o => Object.entries(o || {}).filter(([, n]) => n > 1e-4).map(([k, n]) => `<div class="slot" data-tip="${k}" style="background-image:url(${iconUrl(k)})"><span class="n">${fmtAmt(k, n) || 'x1'}</span></div>`).join('') || '<div class="slot dim"></div>';
   let h = `<div class="pan" style="min-width:236px"><h4>${m.kind}<b>${m.on ? 'running' : 'idle'}</b></h4>`;
@@ -121,11 +126,11 @@ function aiPanels() {
   const qv = queueView(robots), st = SUP.stock || {}, pw = AUTO.power, B = (a, i, ch, tip) => `<span class="qb" data-a="${a}" data-i="${i}" data-tip="${tip}">${ch}</span>`;
   let h = `<div><div class="pan" style="min-width:660px"><h4>ship ai: build queue<b>${qv.length} order${qv.length === 1 ? '' : 's'}</b></h4>`
     + (qv.length ? qv.slice(0, 12).map(q => `<div class="qr"><span class="qn">${q.n}</span><span class="qi" style="background-image:url(${iconUrl(q.kind === 'wall' ? 'iron' : q.kind)})"></span><span class="qk">${q.kind}${q.auto ? ' <i>ai</i>' : ''}${q.manual ? ' <i>moved</i>' : ''}</span><span class="qw ${/waits for|outside|no power/.test(q.why) ? 'warn' : ''}">${q.why}</span>${B('q-top', q.g.id, '&#8679;', 'build this first')}${B('q-up', q.g.id, '&#8593;', 'one place earlier')}${B('q-dn', q.g.id, '&#8595;', 'one place later')}${B('q-x', q.g.id, '&#215;', 'cancel the order')}</div>`).join('') + (qv.length > 12 ? `<div class="qr"><span class="qw">and ${qv.length - 12} more</span></div>` : '')
-      : '<div class="qr"><span class="qw">nothing queued. b, then place anything: the ai orders the kit, has it made, carried and built</span></div>')
+      : '<div class="qr"><span class="qw">nothing queued. tab, then place what you do not hold: the ai orders it, has it made, carried and built</span></div>')
     + `<div class="note">order of service: what lets the base expand (network and robots, then mining, smelting, assembly, storage, belts), then the order you placed them. the arrows override it.</div></div><div class="sep"></div>`;
   h += `<div class="pan"><h4>logistics: how it moves, and why<b>base grid ${(pw.used / 1000).toFixed(1)} / ${(pw.supply / 1000).toFixed(1)} kw</b></h4><div class="qr"><span class="qk">power</span><span class="qw ${pw.demand > pw.supply + 1 ? 'warn' : ''}">${pw.note || 'no source'}${pw.demand > pw.supply + 1 ? `: ${(pw.demand / 1000).toFixed(1)} kw wanted, the last in line run slow` : ''}${pw.off ? `   ${pw.off} machine${pw.off > 1 ? 's' : ''} off the grid` : ''}</span></div>`
     + (AUTO.routes.length ? AUTO.routes.map(r => `<div class="qr"><span class="qi" style="background-image:url(${iconUrl(r.item)})"></span><span class="qk">${r.src.kind} &gt; ${r.dst ? r.dst.kind : 'hold'}</span><span class="qw">${r.why}${r.mode === 'belt' ? (r.done ? ' <i>laid</i>' : ` <i>${r.missing} cells queued</i>`) : ''}</span><span class="qv">${r.rate.toFixed(2)} kg/s ${r.dist.toFixed(0)} m</span></div>`).join('') : '<div class="qr"><span class="qw">no steady flow yet: a machine that makes something opens one</span></div>')
-    + robots.map(r => { const j = r.job, kg = inv.mass(r.cargo); return `<div class="qr"><span class="qk">${r.kind === 'crawler' ? 'hauler' : 'drone'} ${r.id}</span><span class="qw">${j && j.kind === 'carry' ? (r.state === 'cfetch' ? 'to ' : 'carrying ') + j.item + ' &gt; ' + (j.dst.t === 'mach' ? j.dst.m.kind : j.dst.t === 'inv' ? 'hold' : j.dst.t === 'dump' ? 'spoil heap' : 'you') + (j.ground ? ' <i>under an overhang</i>' : '') : j ? j.kind + ' ' + (j.ref.kind || 'terrain') : r.state}</span><span class="qv">${kg > 0.05 ? kg.toFixed(0) + ' / ' + (r.kind === 'crawler' ? CRAWLER.cargo : ROBOT.cargo) + ' kg  ' : ''}${(r.wh / (r.kind === 'crawler' ? CRAWLER.wh : ROBOT.wh) * 100).toFixed(0)}%</span></div>`; }).join('')
+    + robots.map(r => { const j = r.job, kg = inv.mass(r.cargo); return `<div class="qr"><span class="qk">${r.kind === 'crawler' ? 'hauler' : 'drone'} ${r.id}</span><span class="qw">${intentOf(r)}${j && j.kind === 'carry' && j.ground ? ' <i>under an overhang</i>' : ''}${r.gave ? ` <i>gave up ${r.gave}x</i>` : ''}</span><span class="qv">${kg > 0.05 ? kg.toFixed(0) + ' / ' + (r.kind === 'crawler' ? CRAWLER.cargo : ROBOT.cargo) + ' kg  ' : ''}${(r.wh / (r.kind === 'crawler' ? CRAWLER.wh : ROBOT.wh) * 100).toFixed(0)}%</span></div>`; }).join('')
     + `<div class="note">robots against a belt: trip time there and back at loaded speed, ${ROBOT.cargo} kg a trip, against cells to build, iron, ${AUX_W / 1000} kw of bus, level ground and what is awake nearby. the ai lays the belt itself when it wins.</div></div></div>`;
   const cand = RECIPES.map(r => Object.keys(r.out)[0]).concat(['basalt', 'biomass', 'iron ore']).filter(k => !(k in SUP.targets));
   h += `<div class="pan" style="min-width:430px"><h4>stock targets<b>${SUP.on ? 'the ai keeps these in stock' : 'ai off'}</b></h4>`
@@ -137,12 +142,13 @@ function aiPanels() {
 const INV = c => c === 'p' ? S.inv : S.open && S.open.inv;
 function act(t, button, shift) {
   const a = t.dataset.a, i = t.dataset.i;
-  if (a === 'slot' && !ui.open) S.P.slot = +i;
+  if (a === 'slot' && !ui.open) { S.P.slot = +i; S.plan = null; }
   else if (a === 'slot') clickSlot(INV(t.dataset.c), +i, button, shift, t.dataset.c);
+  else if (a === 'print' && button === 2) { const out = Object.keys(RECIPE[i].out)[0]; if (ITEMS[out].build) { ui.toggle(false); if (S.mode !== 'blueprint') setBlueprint(true); S.plan = out; } }
   else if (a === 'print') { if (!printerQueue(S.printer, S.inv, i, shift ? 5 : 1)) S.say(S.printer.q.length >= 12 ? 'printer queue is full' : 'missing material for ' + i, 2); }
   else if (a === 'unprint') printerCancel(S.printer, S.inv, +i);
-  else if (a === 'bp') { BP.sel = +i; BP.tool = 'place'; }
-  else if (a === 'tool') BP.tool = BP.tool === i ? 'place' : i;
+  else if (a === 'plan') { S.plan = S.plan === i ? null : i; S.tool = null; }
+  else if (a === 'tool') { S.tool = S.tool === i ? null : i; BP.drag = null; }
   else if (a === 'recipe') { const m = S.open; if (m && !m.busy) { for (const k in m.inp) { S.add(k, m.inp[k]); } m.inp = {}; m.recipe = i; } else S.say('wait for the batch to finish', 2); }
   else if (a === 'xfer') { const m = S.open; if (held && m && accepts(m, held.id)) { held.n = give(m, held.id, held.n); if (held.n <= EPS) held = null; } else if (m) quickTransfer(m); }
   else if (a === 'q-top' || a === 'q-up' || a === 'q-dn') { const g = BP.ghosts.find(q => q.id === +i); if (g) bump(g, a === 'q-top' ? -2 : a === 'q-up' ? -1 : 1); }

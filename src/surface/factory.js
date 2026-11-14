@@ -8,6 +8,7 @@ import { light } from './light.js';
 import { S, C, mul } from './state.js';
 import { env } from './env.js';
 import { ITEMS, RECIPE, RECIPES, makeInv, inv } from '../items.js';
+import { platAt } from './layers.js';
 
 // sink(cell x, row, item, n) -> what was not taken, or null when nothing takes items there (the ship hold's intake)
 export const F = { machines: [], items: [], cells: new Map(), pad: null, printer: null, sink: null };
@@ -29,13 +30,15 @@ const key = (x, y) => (x + 32768) * 65536 + (y + 32768);
 export const machineAt = (gx, gy) => F.cells.get(key(gx, gy));
 export function canPlace(kind, gx, gy) {
   const d = DEFS[kind]; let sup = 0;
-  for (let i = 0; i < d.w; i++) { if (world.solidAt((gx + i + 0.5) * TS, gy * TS - 0.3)) sup++; for (let j = 0; j < d.h; j++) { if (F.cells.has(key(gx + i, gy + j))) return false; if (world.dens((gx + i + 0.5) * TS, (gy + j + 0.5) * TS) > (j === 0 ? 0.2 : 0.05)) return false; } }
+  for (let i = 0; i < d.w; i++) { if (world.solidAt((gx + i + 0.5) * TS, gy * TS - 0.3) || platAt(gx + i, gy - 1)) sup++; for (let j = 0; j < d.h; j++) { if (F.cells.has(key(gx + i, gy + j))) return false; if (world.dens((gx + i + 0.5) * TS, (gy + j + 0.5) * TS) > (j === 0 ? 0.2 : 0.05)) return false; } }
   return sup >= Math.ceil(d.w * 0.6);
 }
 export function place(kind, gx, gy, dir = 1, quiet) {
   const d = DEFS[kind], m = { kind, x: gx, y: gy, w: d.w, h: d.h, dir, inp: {}, out: {}, t: 0, on: false, n: 0, hp: d.hp, seed: Math.random() * 100, nt: Math.random() };
   for (let i = 0; i < d.w; i++) for (let j = 0; j < d.h; j++) F.cells.set(key(gx + i, gy + j), m);
-  world.box(gx * TS + 0.02, gy * TS, (gx + d.w) * TS - 0.02, (gy + d.h) * TS, -1); world.box(gx * TS, gy * TS - 0.3, (gx + d.w) * TS, gy * TS - 0.02, 1, M.PLATE);
+  // it stands in the open: the rock in its cells is cleared and a plate foundation is laid under it (not when it stands on a deck)
+  let deck = false; for (let i = 0; i < d.w; i++) if (platAt(gx + i, gy - 1) && !world.solidAt((gx + i + 0.5) * TS, gy * TS - 0.3)) deck = true;
+  world.box(gx * TS + 0.02, gy * TS, (gx + d.w) * TS - 0.02, (gy + d.h) * TS, -1); if (!deck) world.box(gx * TS, gy * TS - 0.3, (gx + d.w) * TS, gy * TS - 0.02, 1, M.PLATE);
   if (kind === 'chest') m.inv = makeInv(24); if (kind === 'assembler') m.recipe = 'part'; if (kind === 'miner') m.depth = 0.5; if (kind === 'hub') m.drones = 0;
   if (kind === 'pad') F.pad = m; if (kind === 'bio-printer') { F.printer = m; if (!quiet) events.emit('printerBuilt'); }
   F.machines.push(m); if (!quiet) { audio.play('place'); events.emit('built', kind); } return m;

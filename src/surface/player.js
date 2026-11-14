@@ -19,6 +19,8 @@ import { floraHit, floraBlast } from './flora.js';
 import { F } from './factory.js';
 import { matter } from './matter.js';
 import { mobility, REACTOR_KG } from './power.js';
+import { deckUnder, deckStep } from './layers.js';
+import { cursorKind, thingAt } from './blueprint.js';
 import { K, kitKg, hasLaser, hasReactor, drawReactor, drawLaser } from './kit.js';
 
 export const SUIT = { bat: 600, o2: 1.2, prop: 2.0, lampW: 15, rtgW: 40, o2Rate: 0.0012, jetRate: 0.18, gather: 28, reach: 1.7 };
@@ -30,34 +32,66 @@ const foot = () => ({ x: 0, y: 0, t: -1, sx: 0, sy: 0, tx: 0, ty: 0, air: true }
 export const P = { x: 0, y: 0, vx: 0, vy: 0, ground: false, face: 1, hp: 100, bat: { wh: SUIT.bat, cap: SUIT.bat }, o2: SUIT.o2, prop: SUIT.prop, slot: 0, aim: 0, mag: { rifle: 30, shotgun: 6 }, reload: 0, cool: 0, dead: 0, shots: 0, flashT: 0, air: 0,
   hurtT: 0, recoil: 0, bloom: 0, ads: 0, hitT: 0, weapon: null, charging: false, wa: 0, wv: 0, gx: 0, gy: 1.3, act: null, wantFire: false, exert: 0, stumble: 0, load: 0, reach: null, gatherT: 0,
   rig: { f: [foot(), foot()], py: 0.88, pv: 0, lean: 0, lv: 0, lvx: 0, ax: 0, breath: 0, sdir: 1, head: 0 } };
-const R = 0.3, CY = [0.3, 0.9, 1.5], nv = [0, 0], HIP0 = 0.88, THIGH = 0.46, SHIN = 0.46;
-export function spawnAt(x) { P.x = x; P.y = (world.groundY(x, surfaceH(x) + 6, 0, 30) || surfaceH(x)) + 0.05; P.vx = P.vy = 0; P.hp = 100; P.dead = 0; P.prop = SUIT.prop; P.o2 = SUIT.o2; P.bat.wh = Math.max(P.bat.wh, 200); P.act = null; P.stumble = 0; for (const f of P.rig.f) f.air = true; }
+const R = 0.3, nv = [0, 0], HIP0 = 0.88, THIGH = 0.46, SHIN = 0.46;
+export function spawnAt(x) { P.x = x; P.y = (world.groundY(x, surfaceH(x) + 6, 0, 30) || surfaceH(x)) + 0.05; P.vx = P.vy = 0; P.hp = 100; P.dead = 0; P.prop = SUIT.prop; P.o2 = SUIT.o2; P.bat.wh = Math.max(P.bat.wh, 200); P.act = null; P.stumble = 0; for (const f of P.rig.f) f.air = true; safe.x = P.x; safe.y = P.y; safe.ok = bodyDepth() < 0.03; }
 export function hurt(d, kx = 0, ky = 0) {
   if (P.dead) return; P.hp -= d; P.vx += kx; P.vy += ky; S.flash = Math.min(1, S.flash + d / 30); G.shake += d * 0.012; P.hurtT = 0.5; audio.play('hit'); if (d > 4) stumble(0.35 + d * 0.01, Math.sign(kx) || -P.face);
   if (P.dead) return;
   if (P.hp <= 0) { P.dead = 3; S.corpse = { x: P.x, y: P.y, inv: inv.dump(S.inv) }; S.inv.slots.fill(null); S.printer.q.length = 0; P.act = null; events.emit('died'); }
 }
 function stumble(t, dir) { if (P.stumble > 0.1) return; P.stumble = t; P.rig.sdir = dir || Math.sign(P.vx) || P.face; P.rig.pv -= 1.6; P.rig.lv += P.rig.sdir * 2.2; P.vx *= 0.55; P.exert = Math.min(1, P.exert + 0.2); }
-// push the three body circles out of the field; returns true when the feet rest on walkable ground
-function resolve() {
-  let ground = false;
-  for (let it = 0; it < 2; it++) for (let c = 0; c < 3; c++) {
-    const cy = P.y + CY[c], d = world.dist(P.x, cy); if (d >= R) continue;
-    world.normal(P.x, cy, nv); const push = R - d;
-    if (c === 0 && nv[1] > 0.8) { P.y += push / nv[1]; if (P.vy < 0) P.vy = 0; ground = true; }
-    else if (c === 0 && nv[1] > 0.15 && Math.abs(nv[0]) > 0.2) {
-      // steep ground or the foot of a wall: step up when the obstacle is low, else it is a wall (never a ramp upward)
-      const dir = -Math.sign(nv[0]);
-      if (world.dist(P.x + dir * 0.25, P.y + 0.55 + R) > R * 0.9) { P.y += Math.min(push * 1.5 + 0.01, 0.07); if (P.vy < 0) P.vy = 0; ground = true; }
-      else { P.x += Math.sign(nv[0]) * push / Math.max(Math.abs(nv[0]), 0.5); if (P.vx * nv[0] < 0) P.vx = 0; if (nv[1] > 0.45) ground = true; }
-    }
-    else { P.x += nv[0] * push; P.y += nv[1] * push; const vn = P.vx * nv[0] + P.vy * nv[1]; if (vn < 0) { P.vx -= nv[0] * vn; P.vy -= nv[1] * vn; } }
+// The body against the ground. It is a capsule 0.6 m wide and 1.8 m tall, felt at eighteen points on its outline: five
+// under the feet, ten up the sides, three over the head. A point that is inside rock is pushed out along the field's
+// gradient there, deepest first. Only the sign of the field and its slope at the surface are used, never a distance
+// read far from it, so worked ground (cut, filled, built on) holds exactly like untouched ground. The move is cut into
+// steps of at most 8 cm, so no speed carries the body through a floor; and if it ever ends up deep in rock all the
+// same (ground placed on top of it), it goes back to the last place where it was free.
+const OUT = [[0, 0, 0], [-0.15, 0.04, 0], [0.15, 0.04, 0], [-0.26, 0.15, 0], [0.26, 0.15, 0], [-0.3, 0.32, 1], [0.3, 0.32, 1], [-0.3, 0.6, 1], [0.3, 0.6, 1], [-0.3, 0.9, 1], [0.3, 0.9, 1], [-0.3, 1.2, 1], [0.3, 1.2, 1], [-0.3, 1.5, 1], [0.3, 1.5, 1], [-0.21, 1.71, 2], [0.21, 1.71, 2], [0, 1.8, 2]];
+const safe = { x: 0, y: 0, ok: false }, brace = [0, 0, 0], still = { x: 0, y: 0, t: 0 };
+// how deep the deepest outline point is in rock (m, 0 when the body is free)
+export function bodyDepth(x = P.x, y = P.y) { let w = 0; for (const o of OUT) { const v = world.dens(x + o[0], y + o[1]); if (v > w) w = v; } return w; }
+const air = (x, y) => world.dens(x, y) < 0;
+// is the thing in the way low enough to step onto? The body, half a metre higher and a little further on, must be free.
+const canStep = dir => air(P.x + dir * 0.25, P.y + 0.58) && air(P.x + dir * 0.5, P.y + 0.85) && air(P.x + dir * 0.25, P.y + 1.4) && air(P.x, P.y + 2.3);
+// returns true when the feet rest on walkable ground. walk = the direction the legs push in (-1, 0, 1)
+function resolve(walk) {
+  let ground = false, hold = 0;
+  for (let it = 0; it < 5; it++) {
+    let worst = 0, wi = -1; for (let i = 0; i < OUT.length; i++) { const v = world.dens(P.x + OUT[i][0], P.y + OUT[i][1]); if (v > worst) { worst = v; wi = i; } }
+    if (wi < 0) break; const o = OUT[wi], px = P.x + o[0], py = P.y + o[1], depth = Math.min(worst, 0.15) + 0.0005;
+    if (world.normal(px, py, nv) < 0.05) { nv[0] = o[2] === 1 ? -Math.sign(o[0]) : 0; nv[1] = o[2] === 0 ? 1 : o[2] === 2 ? -1 : 0; }
+    if (o[1] < 0.35 && nv[1] > 0.7) { P.y += depth / nv[1]; if (P.vy < 0) P.vy = 0; ground = true; }                                   // walkable under a foot (or under the hip, caught on a rim): straight up, so standing on a slope does not creep
+    else if (o[1] < 0.4 && walk && -Math.sign(nv[0]) === walk && Math.abs(nv[0]) > 0.3 && nv[1] > -0.3 && P.vy < 1 && canStep(walk)) { P.y += Math.min(depth + 0.02, 0.07); if (P.vy < 0) P.vy = 0; ground = true; }      // a low step or a steep bank the legs can take
+    else { P.x += nv[0] * depth; P.y += nv[1] * depth; const vn = P.vx * nv[0] + P.vy * nv[1]; if (vn < 0) { P.vx -= nv[0] * vn; P.vy -= nv[1] * vn; } hold |= o[1] < 0.65 && nv[1] > 0.3 ? 4 : nv[0] > 0.3 ? 1 : nv[0] < -0.3 ? 2 : 0; }
   }
+  // braced: a foot on a steep hold, or rock against both sides, and the body has come to a stop. That is a place to
+  // push off from, so a body wedged in a narrow cut can jump and climb instead of hanging there for good.
+  // (the two sides seldom touch in the same step, so each hold is remembered for a fifth of a second)
+  if (hold & 1) brace[0] = 0.2; if (hold & 2) brace[1] = 0.2; if (hold & 4) brace[2] = 0.2;
+  if (!ground && (brace[2] > 0 || (brace[0] > 0 && brace[1] > 0)) && P.vx * P.vx + P.vy * P.vy < 0.4) ground = true;
   return ground;
 }
+// one frame of motion: short steps, the ground, the decks. Returns true when the feet are on something.
+function moveBody(dt, walk, drop) {
+  const n = Math.max(1, Math.ceil(Math.hypot(P.vx, P.vy) * dt / 0.08)), h = dt / n; let g = false; P.onDeck = false; brace[0] -= dt; brace[1] -= dt; brace[2] -= dt;
+  for (let i = 0; i < n; i++) {
+    const y0 = P.y; P.x += P.vx * h; P.y += P.vy * h; g = resolve(walk) || g;
+    if (P.vy <= 0 && !drop) { const dk = deckUnder(P.x, y0, P.y); if (dk !== null) { P.y = dk; P.vy = 0; g = true; P.onDeck = true; } }
+    if (walk && !drop && P.vy <= 0.5) { const up = deckStep(P.x, P.y, walk); if (up !== null && bodyDepth(P.x + walk * 0.1, up + 0.02) < 0.03) { P.y = up; P.x += walk * 0.02; P.vy = 0; g = true; P.onDeck = true; } }      // onto a deck that is a low step up
+    const dp = bodyDepth();
+    if (dp < 0.03) { safe.x = P.x; safe.y = P.y; safe.ok = true; }
+    else if (dp > 0.2) { if (safe.ok && Math.hypot(safe.x - P.x, safe.y - P.y) < 2.5) { P.x = safe.x; P.y = safe.y; } else P.y += 0.12; P.vx = P.vy = 0; break; }      // never left inside rock
+  }
+  // standing is not the same as touching in this very step: resting on the ground the body is pushed a hair clear of it
+  // and takes a step or two to sink back. Walkable rock within 3 cm under a foot point is ground.
+  if (!g && P.vy <= 0.2 && P.vy > -1.5) for (let i = 0; i < 7 && !g; i++) { const px = P.x + OUT[i][0], py = P.y + OUT[i][1] - 0.03; if (world.dens(px, py) > 0 && world.normal(px, py, nv) > 0.05 && nv[1] > 0.7) g = true; }
+  return g;
+}
+// the ground a foot can stand on near (x, y): rock, or the deck the body is on
+function footY(x, y) { const gy = world.groundY(x, y, 0.3, 1.6); if (P.onDeck) { const dk = deckUnder(x, P.y + 0.3, P.y - 0.3, 0.02); if (dk !== null && (gy === null || dk > gy)) return dk; } return gy; }
 const gunMuzzle = (l = 0.95) => [P.gx + Math.cos(P.aim) * l, P.gy + Math.sin(P.aim) * l];
 const heldWeapon = () => { const s = S.inv.slots[P.slot]; if (s && ITEMS[s.id].weapon) return s.id; const i = S.inv.slots.findIndex((q, j) => j < 9 && q && ITEMS[q.id].weapon); if (i >= 0) { P.slot = i; return S.inv.slots[i].id; } return null; };
-export function setMode(m) { S.mode = S.mode === m ? 'build' : m; audio.play('click'); if (S.mode === 'combat' && !heldWeapon() && !hasLaser()) S.say('unarmed: the ship laser is the only weapon'); }
+export function setMode(m) { S.mode = S.mode === m ? 'build' : m; S.plan = null; S.tool = null; audio.play('click'); if (S.mode === 'combat' && !heldWeapon() && !hasLaser()) S.say('unarmed: the ship laser is the only weapon'); }
 S.drop = (id, n) => matter.spawn(id, n, P.x + P.face * 0.45, P.y + 1.0, P.face * 1.3 + P.vx, 1.2);
 
 export function stepPlayer(dt) {
@@ -83,9 +117,13 @@ export function stepPlayer(dt) {
   }
   audio.loop('engine', jet ? 0.35 : 0, 240);
   P.vy -= GRAV * dt; P.vy = Math.max(P.vy, -60);
-  const was = P.ground, vy0 = P.vy, n = Math.max(1, Math.ceil(Math.max(Math.abs(P.vx), Math.abs(P.vy)) * dt / 0.1)); let g = false;
-  for (let i = 0; i < n; i++) { P.x += P.vx * dt / n; P.y += P.vy * dt / n; g = resolve() || g; }
-  if (!g && was && !jumped && P.vy <= 0.5) { const d = world.dist(P.x, P.y + R); if (d < R + 0.2) { world.normal(P.x, P.y + R, nv); if (nv[1] > 0.8) { P.y -= (d - R); P.vy = Math.min(P.vy, 0); g = true; } } }
+  const was = P.ground, vy0 = P.vy, drop = !ui && input.key('s'); let g = moveBody(dt, ax, drop);
+  // walking down a slope the feet keep the ground: a short look under them, in the rock itself (decks are passed above)
+  if (!g && was && !jumped && P.vy <= 0.5 && !drop) { for (let d = 0.03; d <= 0.24; d += 0.03) if (world.dens(P.x, P.y - d) > 0) { world.normal(P.x, P.y - d, nv); if (nv[1] > 0.7) { P.y -= d - 0.03; P.vy = Math.min(P.vy, 0); g = resolve(0) || true; } break; } }
+  // and the last word: a body that gravity has not moved for a quarter of a second is held up by something, whatever
+  // shape it is. That is standing, so there is no place the body can come to rest and not be able to jump from.
+  if (Math.abs(P.x - still.x) + Math.abs(P.y - still.y) > 0.012) { still.x = P.x; still.y = P.y; still.t = 0; } else still.t += dt;
+  if (!g && still.t > 0.25 && P.vy <= 0.2 && !drop) g = true;
   if (g && !was) { const imp = -vy0; if (imp > 3) { audio.play('thud'); dust(P.x, P.y, 4 + imp); env.noise(P.x, P.y, 8 + imp + mob.k * 8); P.rig.pv -= imp * (0.45 + mob.k * 0.5); floraBlast(P.x, P.y, 2, imp * 0.5); } if (imp > 5.2 - 1.8 * mob.k) stumble(0.25 + (imp - 4) * 0.05 + mob.k * 0.3); if (imp > 11 - 3 * mob.k) hurt((imp - 11 + 3 * mob.k) * (imp - 11 + 3 * mob.k) * 1.8); }
   P.ground = g;
   if (P.y < LAVA_Y + 0.3 && !world.solidAt(P.x, P.y + 0.5)) hurt(60 * dt);
@@ -103,18 +141,22 @@ export function stepPlayer(dt) {
   const done = printerStep(S.printer, S.inv, dt, P.bat, CARRY - inv.mass(S.inv) + 200);
   if (done) { S.gain(done, 0.0001); audio.play('place'); events.emit('suitPrinted'); if (ITEMS[done].build) events.emit('firstMachinePrinted'); if (S.printer.over) { for (const k in S.printer.over) S.drop(k, S.printer.over[k]); S.printer.over = null; } }
   // hotbar
-  if (!ui && S.mode !== 'blueprint') { for (let i = 0; i < 9; i++) if (input.hit(String(i + 1))) P.slot = i; if (input.wheel) P.slot = (P.slot + (input.wheel > 0 ? 1 : 8)) % 9; }
-  if (input.hit('f')) light.lamp.on = !light.lamp.on;
+  if (!ui) { for (let i = 0; i < 9; i++) if (input.hit(String(i + 1))) { P.slot = i; S.plan = null; } if (input.wheel) { P.slot = (P.slot + (input.wheel > 0 ? 1 : 8)) % 9; S.plan = null; } }
+  if (input.hit('l') && !ui) light.lamp.on = !light.lamp.on;
   if (input.hit('c') && !ui) setMode('combat');
   // hands: the laser (kit.js fires it), placing terrain, gathering loose matter, dropping what is held
   const wn = combat ? heldWeapon() : null; P.weapon = wn;
-  if (!ui && !busy && input.down[0] && hasLaser() && (S.mode === 'build' || (combat && !wn))) P.wantFire = true;
-  if (!ui && !busy && S.mode === 'build') {
+  // the hands. With something placeable on the cursor the left button places it (blueprint.js); with nothing on it the
+  // left button is the ship laser. The right button lays the selected soil, basalt or plate as ground, unless it is over
+  // something it would remove instead. Z drops the selected stack.
+  const cur = combat ? null : cursorKind(), gx = Math.floor(S.mouse.x / TS), gy = Math.floor(S.mouse.y / TS);
+  if (!ui && !busy && input.down[0] && hasLaser() && !cur && !S.tool && (!combat || !wn)) P.wantFire = true;
+  if (!ui && !busy && !combat) {
     const sl = S.inv.slots[P.slot], pm = sl && ITEMS[sl.id].place;
-    if (input.down[2] && pm && Math.hypot(S.mouse.x - P.x, S.mouse.y - P.y - 0.9) < 6) placeMat(sl, pm, dt);
-    if (input.hit('x') && sl) { const d = ITEMS[sl.id], n = d.u === 'ea' ? 1 : d.u === 'rd' ? Math.min(sl.n, 30) : Math.min(sl.n, 15 / d.m); S.drop(sl.id, inv.take(S.inv, sl.id, n)); audio.play('thud'); events.emit('dropped'); }
+    if (input.down[2] && pm && !S.plan && !thingAt(gx, gy) && Math.hypot(S.mouse.x - P.x, S.mouse.y - P.y - 0.9) < 6) placeMat(sl, pm, dt);
+    if (input.hit('z') && sl) { const d = ITEMS[sl.id], n = d.u === 'ea' ? 1 : d.u === 'rd' ? Math.min(sl.n, 30) : Math.min(sl.n, 15 / d.m); S.drop(sl.id, inv.take(S.inv, sl.id, n)); audio.play('thud'); events.emit('dropped'); }
   }
-  if (!ui && !busy && input.key('v') && S.mode !== 'blueprint') gather(dt); else P.gatherT = 0;
+  if (!ui && !busy && input.key('v')) gather(dt); else P.gatherT = 0;
   if (!ui && combat) {
     const wp = wn && WEAPON[wn];
     if (wp) {
@@ -144,15 +186,15 @@ function stepRig(dt, mob, ax) {
   for (let i = 0; i < 2; i++) {
     const f = F2[i], o = F2[1 - i];
     if (!P.ground) { const tx = P.x - P.vx * 0.035 + (i ? 0.12 : -0.1) * P.face, ty = P.y + 0.1 + (i ? 0.07 : 0) + clamp(-P.vy * 0.012, -0.08, 0.2), q = Math.min(1, dt * 16); f.x += (tx - f.x) * q; f.y += (ty - f.y) * q; f.t = -1; f.air = true; continue; }
-    if (f.air) { f.air = false; f.x = P.x + (i ? 0.14 : -0.12) * P.face; f.y = world.groundY(f.x, P.y + 0.7, 0.3, 1.6) ?? P.y; f.t = -1; }
+    if (f.air) { f.air = false; f.x = P.x + (i ? 0.14 : -0.12) * P.face; f.y = footY(f.x, P.y + 0.7) ?? P.y; f.t = -1; }
     if (f.t >= 0) {
       f.t += dt / T; const u = Math.min(1, f.t), e = u * u * (3 - 2 * u); f.tx += P.vx * dt * 0.45;
       f.x = lerp(f.sx, f.tx, e); f.y = lerp(f.sy, f.ty, e) + Math.sin(u * Math.PI) * (0.09 + 0.035 * sp) * (1 - 0.4 * k);
-      if (u >= 1) { f.t = -1; f.y = world.groundY(f.x, P.y + 0.7, 0.3, 1.6) ?? f.ty; if (sp > 0.5) { audio.play('step'); env.noise(P.x, P.y, (sp > 7 ? 9 : 5) + k * 6); if (k > 0.4) G.shake = Math.max(G.shake, 0.012); if (Math.random() < 0.3 + k * 0.5) dust(f.x, f.y, 1); } }
+      if (u >= 1) { f.t = -1; f.y = footY(f.x, P.y + 0.7) ?? f.ty; if (sp > 0.5) { audio.play('step'); env.noise(P.x, P.y, (sp > 7 ? 9 : 5) + k * 6); if (k > 0.4) G.shake = Math.max(G.shake, 0.012); if (Math.random() < 0.3 + k * 0.5) dust(f.x, f.y, 1); } }
     } else {
       const home = P.x + (i ? 0.14 : -0.12) * P.face, lag = (P.x - f.x) * mv, far = Math.hypot(f.x - P.x, f.y - (P.y + HIP0)) > 0.93;
       if ((mv ? lag > stride * 0.5 : Math.abs(f.x - home) > 0.11 && sp < 0.3) || far) {
-        if (o.t < 0 || far) { f.t = 0; f.sx = f.x; f.sy = f.y; f.tx = mv ? P.x + mv * stride * 0.5 + P.vx * T * 0.8 : home; f.ty = world.groundY(f.tx, P.y + 0.7, 0.3, 1.6) ?? P.y;
+        if (o.t < 0 || far) { f.t = 0; f.sx = f.x; f.sy = f.y; f.tx = mv ? P.x + mv * stride * 0.5 + P.vx * T * 0.8 : home; f.ty = footY(f.tx, P.y + 0.7) ?? P.y;
           if (mv && sp > 4.2 - k && Math.abs(f.ty - P.y) > 0.4 && Math.random() < 0.35 + k * 0.4) stumble(0.3 + k * 0.25, mv); }
       }
     }

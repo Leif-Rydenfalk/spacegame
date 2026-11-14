@@ -4,7 +4,7 @@
 // identity can replace it later with save.use(adapter): nothing else in the game touches storage.
 // A blob is { version, rev, savedAt, hash, data }. data = { seed, act, time, playerId, parts: { name: dump } }.
 import { G } from './core.js';
-export const VERSION = 4;
+export const VERSION = 5;
 // version n -> n + 1. Version 1 was demo 1, which had no saves. Version 3 (round 3) added the kit (ship laser and
 // reactor instead of the laser drill item), loose matter, the ship hold and the stock targets: a version 2 save gets
 // the kit on the player's back, an empty hold, and no loose matter. Its rifle and shotgun stay in the pack.
@@ -14,7 +14,17 @@ const MIGRATE = { 1: b => { b.version = 2; return b; }, 2: b => { b.version = 3;
   // version 4 (round 4): the world is a round planet. A flat round 3 save maps straight onto it: x was metres from the
   // crash site and still is, now along the circumference (anything beyond half of it wraps round); edited terrain
   // chunks are folded onto the circle when they load; the build queue gets its order, the ship AI its routes.
-  3: b => { b.version = 4; const s = b.data && b.data.parts && b.data.parts.surface; if (s && s.auto === undefined) s.auto = { on: 1, st: [] }; return b; } };
+  3: b => { b.version = 4; const s = b.data && b.data.parts && b.data.parts.surface; if (s && s.auto === undefined) s.auto = { on: 1, st: [] }; return b; },
+  // version 5 (round 5): decks (the passable layer), the list of items the base has seen (it decides which recipes are
+  // shown), loose bodies with a shape and a pose, and Tab's blueprint mode in place of the old one. A version 4 save
+  // has no decks; it has seen what it holds (the suit, the hold, chests, machines); its loose bodies get a shape when
+  // they load (matter.js) and lie where they lay; a game saved in the old blueprint mode comes back in the normal one,
+  // its queued ghosts untouched.
+  4: b => { b.version = 5; const s = b.data && b.data.parts && b.data.parts.surface; if (!s) return b;
+    if (!s.plats) s.plats = [];
+    if (!s.known) { const k = new Set(), add = a => { for (const q of a || []) if (q) k.add(q[0]); }; add(s.inv); add(s.kit && s.kit.hold); for (const m of (s.factory && s.factory.m) || []) { add(m.inv); for (const id in m.i || {}) k.add(id); for (const id in m.o || {}) k.add(id); k.add(m.k); } for (const q of s.matter || []) k.add(q[0]); s.known = [...k].sort(); }
+    if (s.mode === 'blueprint') s.mode = 'build';
+    return b; } };
 const parts = {};
 export function fnv(str) { let h = 0x811c9dc5; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(16).padStart(8, '0'); }
 

@@ -22,7 +22,7 @@ import { powerBudget, REACTOR_W } from './power.js';
 import { hive } from './hive.js';
 import { creatures } from './creatures.js';
 
-export const RANK = { antenna: 0, hub: 0, miner: 1, furnace: 2, assembler: 3, chest: 4, belt: 5, 'bio-printer': 6, pad: 7, wall: 8 };
+export const RANK = { antenna: 0, hub: 0, miner: 1, furnace: 2, assembler: 3, chest: 4, belt: 5, platform: 5, 'bio-printer': 6, pad: 7, wall: 8 };
 export const WATT = { belt: 40, miner: 3000, furnace: 1500, assembler: 2000, hub: 300, antenna: 60, 'bio-printer': 500, pad: 200, chest: 0 };
 export const AUX_W = 4000, GRID_R = 26, BELT_MAX = 44;      // the wreck's own bus; how far a grid node reaches; the longest belt the AI will lay
 export const BOT = { cargo: 60, vEmpty: 8, vFull: 4.4, handle: 4, flyW: 70 };   // the numbers the route model uses for a drone

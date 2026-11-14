@@ -68,7 +68,7 @@ export function renderFrame(flash) {
 // ---- instanced sprite batch -------------------------------------------------------------------------------------
 // shapes: 0 grained rect, 1 soft glow, 2 capsule (taper, curve, rim), 3 sunlit hull plate, 4 ring, 5 sunlit ball, 6 engine plume,
 //         7 foliage mass, 8 dome (half disc), 9 ridge silhouette (a parallax ground line), 10 light shaft, 11 fog band,
-//         12 leaf blade (curve), 13 rock chunk (faceted)
+//         12 leaf blade (curve), 13 rock chunk (faceted), 14 convex rock body (Batch.poly)
 // modes:  0 unlit, 1 lit by the surface light map, 2 additive emissive
 // extra per instance (iD): taper 0..1 (the far end is thinner), curve in px (a parabolic bend), rim light 0..1
 const BV = `
@@ -119,10 +119,15 @@ void main(){
   else if(shape<12.5){ float cv=vD.y, x01=vL.x+.5; q.y-=cv*(1.0-4.0*vL.x*vL.x); float hh=vS.y*.5-abs(cv); float pr=pow(max(0.,sin(3.14159*pow(x01,.75+vD.x))),.8)*hh;
     float sd=abs(q.y)-pr; a=smoothstep(.8*uSoft,-.8*uSoft,sd)*step(.0,x01)*step(x01,1.); float ny=q.y/max(hh,1.);
     col*=(.72+.4*ny*sl.y+.25*h(floor(q/1.5)+vP.w))*(1.-.35*smoothstep(1.2,.0,abs(q.y))); rim=vD.z*smoothstep(-2.5,-.3,sd)*max(0.,ny*sl.y); }
-  else { vec2 u=vL*2.0; float an=atan(u.y,u.x), sd7=vP.w*5.1, d=length(u);     // a rock: a lumpy outline, a broken face or two, grain, light from above
+  else if(shape<13.5){ vec2 u=vL*2.0; float an=atan(u.y,u.x), sd7=vP.w*5.1, d=length(u);     // a rock: a lumpy outline, a broken face or two, grain, light from above
     float R=.74+.2*vn(vec2(an*1.3+sd7,sd7))+.07*vn(vec2(an*4.+sd7*2.,1.))-.1*smoothstep(.2,.9,abs(sin(an*1.5+sd7)));
     a=smoothstep(R,R-2.6*uSoft/max(vS.x,2.),d); float face=vn(u*1.6+sd7), crack=smoothstep(.06,.0,abs(vn(u*2.3+sd7*3.)-.5));
     col*=(.3+.75*smoothstep(-.8,.7,u.y+(face-.5)*1.2))*(.7+.5*face)*(.8+.4*h(floor(q/1.5)+vP.w))*(1.-.45*crack)*(1.-.4*smoothstep(R-.5,R,d)); rim=vD.z*smoothstep(R-.28,R-.02,d)*smoothstep(.1,.7,u.y)*.7; }
+  else { // 14: a convex rock, exactly the body the solver moves: a box of the sprite's size with four chamfered corners (iD = the cuts, as fractions of the short half side)
+    vec2 hs=vS*.5, aq=abs(q); float m=min(hs.x,hs.y), sd=max(aq.x-hs.x,aq.y-hs.y); vec2 n=aq.x-hs.x>aq.y-hs.y ? vec2(sign(q.x),0.) : vec2(0.,sign(q.y));
+    float cu=(q.x>0. ? (q.y>0.?vD.x:vD.w) : (q.y>0.?vD.y:vD.z))*m, dd=(aq.x+aq.y-(hs.x+hs.y-cu))*.7071; if(dd>sd){ sd=dd; n=sign(q)*.7071; }
+    a=smoothstep(.6,-.6,sd); vec2 g=q/max(m,1.); float face=vn(g*1.7+vP.w*5.1), crack=smoothstep(.05,.0,abs(vn(g*2.6+vP.w*3.)-.5)), edge=smoothstep(-m*.6,0.,sd);
+    col*=(.62+.5*face)*(1.-.4*crack)*(.82+.36*h(floor(q/1.5)+vP.w))*(1.+edge*(.6*dot(n,sl)-.1)); }
   if(mode>0.5&&mode<1.5){ vec3 L=texture2D(uLight,(vW-uLR.xy)*uLR.zw).rgb; L=L*L*4.0; col=col*L+uRim*rim*(L+vec3(.004)); }
   else if(mode<0.5) col+=(col*1.2+uRim)*rim;
   a*=ca*uFade;
@@ -149,6 +154,9 @@ export class Batch {
     A[i] = x; A[i + 1] = y; A[i + 2] = w; A[i + 3] = h; B[i] = rot; B[i + 1] = shape; B[i + 2] = mode; B[i + 3] = seed;
     C[i] = col[0]; C[i + 1] = col[1]; C[i + 2] = col[2]; C[i + 3] = a; D[i] = taper; D[i + 1] = curve; D[i + 2] = rim; D[i + 3] = ex;
   }
+  // a convex rock (shape 14): w, h in world units, c = the four corner cuts (matter.js)
+  poly(x, y, w, h, rot, col, a, mode, seed, c) { if (this.n >= this.cap) return; const i = this.n++ * 4, A = this.A, B = this.B, C = this.C, D = this.D, k = this.k;
+    A[i] = (x - this.ox) * k; A[i + 1] = (y - this.oy) * k; A[i + 2] = w * k; A[i + 3] = h * k; B[i] = rot; B[i + 1] = 14; B[i + 2] = mode; B[i + 3] = seed; C[i] = col[0]; C[i + 1] = col[1]; C[i + 2] = col[2]; C[i + 3] = a; D[i] = c[0]; D[i + 1] = c[1]; D[i + 2] = c[2]; D[i + 3] = c[3]; }
   // a line segment from a to b as a capsule or rect of thickness t (world units)
   seg(x1, y1, x2, y2, t, col, a = 1, shape = 2, mode = 0, seed = 0, taper = 0, curve = 0, rim = 0) { const dx = x2 - x1, dy = y2 - y1, l = Math.hypot(dx, dy); this.add((x1 + x2) / 2, (y1 + y2) / 2, l + (shape === 2 ? t : 0), t, Math.atan2(dy, dx), col, a, shape, mode, seed, taper, curve, rim); }
   end() { const g = this.g; g.instanceCount = this.n; for (const n of ['iA', 'iB', 'iC', 'iD']) { const at = g.attributes[n]; at.clearUpdateRanges(); at.addUpdateRange(0, this.n * 4); at.needsUpdate = true; } }

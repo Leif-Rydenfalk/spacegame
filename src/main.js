@@ -21,7 +21,7 @@ const SCN = [['surface, the slice: awake at the wreck (the default start)', '?ac
   ['launch at 40 km', '?act=space&scenario=launch'], ['space, 220 km orbit', '?act=space'], ['space, belt mining', '?act=space&scenario=mining'], ['space, combat at the depot', '?act=space&scenario=combat'], ['space, hangar', '?act=space&scenario=builder'], ['property tests', '?test=1']];
 function devMenu() {
   const d = document.getElementById('dev'); if (d.style.display === 'block') { d.style.display = 'none'; return; }
-  d.innerHTML = '<div>dev menu (F1)</div><a href="./">title screen (continue / new game)</a>' + SCN.map(([n, u]) => `<a href="${u}&seed=${G.seed}">${n}</a>`).join('') + `<div>seed <input id="seed" value="${G.seed}"></div><div>save slot: ${save.slot || 'none (scenario runs do not save; add &slot=name)'}</div><a href="#" id="sv">save now</a><a href="#" id="ex">export save to a file</a><a href="#" id="im">import save from a file</a><input type="file" id="imf" accept="application/json" style="display:none"><div>, . time warp in space &nbsp; L story log</div>`;
+  d.innerHTML = '<div>dev menu (F1)</div><a href="./">title screen (continue / new game)</a>' + SCN.map(([n, u]) => `<a href="${u}&seed=${G.seed}">${n}</a>`).join('') + `<div>seed <input id="seed" value="${G.seed}"></div><div>save slot: ${save.slot || 'none (scenario runs do not save; add &slot=name)'}</div><a href="#" id="sv">save now</a><a href="#" id="ex">export save to a file</a><a href="#" id="im">import save from a file</a><input type="file" id="imf" accept="application/json" style="display:none"><div>, . time warp in space &nbsp; O story log</div>`;
   d.style.display = 'block'; d.querySelector('#seed').onchange = e => { const p = new URLSearchParams(location.search); p.set('seed', e.target.value); location.search = p.toString(); };
   d.querySelector('#sv').onclick = e => { e.preventDefault(); save.write(); }; d.querySelector('#ex').onclick = e => { e.preventDefault(); save.exportFile(); };
   d.querySelector('#im').onclick = e => { e.preventDefault(); d.querySelector('#imf').click(); };
@@ -29,8 +29,9 @@ function devMenu() {
 }
 function frame(now) {
   requestAnimationFrame(frame);
+  if (window.__dev.still) { last = 0; return; }       // a tool is stepping the game itself (tools/play.mjs): nothing is drawn and no time passes until it lets go
   const real = Math.min(0.1, (now - last) / 1000); if (last) frames.push(now - last); if (frames.length > 1200) frames.shift(); last = now; G.real += real;
-  if (input.hit('F1')) devMenu(); if (input.hit('l')) showLog = !showLog;
+  if (input.hit('F1')) devMenu(); if (input.hit('o')) showLog = !showLog;
   if (G.paused) input.endFrame(); else { acc += real; let n = 0; while (acc >= DT && n < 12) { acc -= DT; n++; G.time += DT; acts[G.act].step(DT); input.endFrame(); } if (n === 12) acc = 0; }
   const flash = acts[G.act].draw(G.real) || 0;
   renderFrame(flash);

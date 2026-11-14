@@ -1,4 +1,32 @@
-# spacegame, demo 1 (round 4: a whole planet, and a base that builds itself)
+# spacegame, demo 1 (round 5: what exists works when you play it by hand)
+
+Round 5 is a robustness round (Leif's words after playing round 4 are in `docs/ROUND5.md`). Nothing new was added
+to the world; six things that were there were made to hold:
+
+1. **The body and the ground.** The body is felt at eighteen points on its outline and moved in steps of at most
+   8 cm, so no speed carries it through a floor, and ground that was cut, filled or built on holds exactly like
+   ground that was never touched. (The real fault was in the field: a brush only wrote the samples it covered, so
+   worked ground stopped being a distance field and everything that asked it "how far is the rock" got a wrong
+   answer. Every edit now repairs the field round itself.)
+2. **Layers.** Decks are a passable layer in front of the rock: you land on one, jump up through it, and hold **S**
+   to drop through, so a shaft has as many floors as you lay. Behind the rock is the back wall: cut anything away
+   and darker rock shows behind it, never the sky.
+3. **Rock.** Loose rock is rigid convex bodies in one solver: contacts with the ground and with each other,
+   friction, a little bounce, rest and sleep, and fracture: a hard landing splits a rock into smaller rocks whose
+   masses add up to the parent's exactly.
+4. **Robots.** A drone plans a way through the air round what is in its way, says what it is doing and for what
+   (over its head and in the list), reserves what it goes to fetch, notices when it gets nowhere, plans again, and
+   after four tries gives the job up and goes home instead of pushing at a wall.
+5. **One inventory, as in Factorio.** A furnace is an item. You craft it into a slot (the arm, slowly) or the base
+   makes it; with the slot selected the left button puts it down and the item is gone.
+6. **Blueprint mode is Tab.** The same items and the same cursor; what you hold is still placed, what you do not
+   hold goes down as a ghost, drawn as a ghost, and the ship AI has it made, carried and built. What you cannot
+   make yet is not shown, in the crafting menu or in the plan row.
+
+`node tools/play.mjs` plays all of that from a fresh start with real keys and a real mouse and fails if any of it
+does not hold. The rest of this file is the earlier rounds' text, updated where round 5 changed it.
+
+## Round 4: a whole planet, and a base that builds itself
 
 Round 4 does two things (Leif's words are in `docs/ROUND4.md`). **The world is a whole round planet**: the ground
 closes on itself, gravity points at the centre for every body, the camera turns with it so down is always the bottom
@@ -37,7 +65,8 @@ npm install        # Node 18+; three 0.170.0, vite 5.4.11, puppeteer-core (check
 npm run dev        # http://localhost:5200
 npm run build      # -> dist/ (one page, one bundle)
 npm run check      # headless: every scenario -> docs/shots/*.png, console errors, save round-trips, ?test=1, writes docs/CHECK.md
-node tools/ui-flow.mjs   # headless, real mouse and keys: inventory, arm, blueprint, the round 3 kit, title, save, continue
+node tools/ui-flow.mjs   # headless, real mouse and keys: inventory, arm, blueprint, the round 3 kit, placing, title, save, continue
+node tools/play.mjs      # headless, the game played by hand from a fresh start (round 5): falls, cutting, rock, crafting, placing, decks, Tab, drones
 node tools/shot.mjs http://localhost:5200/ out-dir name='?act=surface'   # one shot of a running server (--dpr 2 --clip x,y,w,h)
 ```
 
@@ -75,6 +104,11 @@ it also names a slot (`&slot=name`, and `&continue=1` to load it).
 | `?act=surface&scenario=conveyor` | round 4: a furnace and an assembler on level ground: the AI lays the belt; a far furnace gets robots (`&t=40`) |
 | `?act=surface&scenario=overhang` | round 4: ore under a ledge: the ground hauler walks in (`&t=9`) |
 | `?act=surface&scenario=targets` | round 4: the stock-target editor |
+| `?act=surface&scenario=fall` | **round 5**: a fall into a shaft with two decks in it: you land on the first (S drops you to the next) |
+| `?act=surface&scenario=layers` | round 5: decks at three heights in a cut shaft, and the back wall behind everything that was dug |
+| `?act=surface&scenario=rocks` | round 5: 120 rocks let go over a hollow: they fall, break, pile up and lie still (`&t=16`) |
+| `?act=surface&scenario=place` | round 5: a furnace in slot 1, on the cursor: click and it stands, and the slot is empty |
+| `?act=surface&scenario=plan` | round 5: blueprint mode, the plan row, ghosts the ship AI builds (`&t=45`) |
 | `?act=space&scenario=launch` | the rocket at 40 km on the ascent autopilot |
 | `?act=space` | a 220 x 640 km orbit around the home moon in the 12-part scout, 1,770 m/s of delta-v |
 | `?act=space&scenario=mining` | beside a belt asteroid with a mining platform, the depot and two haulers |
@@ -90,18 +124,102 @@ shots), `slot=name`, `continue=1`. `F1` in the game opens the dev menu with the 
 
 | Act 1, surface | Act 2, space |
 |---|---|
-| A/D move, W or Space jump, Shift sprint, hold Space in the air for the jetpack (with the reactor on your back it only brakes the fall) | W main engines (Z lock full, X cut), A/D rotate, Q/E strafe, S retro (RCS) |
-| Mouse aim (the headlamp follows; the laser swings after it, late). LMB the ship laser: it cuts ground and it is the weapon. RMB place the selected soil, basalt or iron as terrain | LMB autocannon, RMB mining laser, wheel zoom (continuous, 0.01 m/px to 1e10 m/px) |
-| **E** use: at the wreck unbolt the laser, pull the reactor, open the ship hold; machine, chest or cache window, terminal, audio log, lore stone; the finished pad | M map (local, planet system, star system), Tab focus (ship, target, depot), T target |
-| **Q** set the reactor down / lift it. **G** stand the laser on its legs as a turret / take it back | `,` `.` time (x2, x4 under thrust; x10 to x100,000 on rails), N prediction on/off |
-| **V** (hold) gather loose matter within reach into the suit. **X** drop the selected stack at your feet | B hangar, P ascent autopilot (from the pad), L story log, F1 dev menu |
-| 1-9 or wheel: hotbar slot. **I** or **Tab**: inventory and the arm's matter compiler (LMB move or drag, RMB split, Shift quick move; click a recipe to queue it, Shift x5; click a queued job to cancel) | |
-| **B** blueprint mode: 1-9, 0 or wheel pick a building, LMB queue a ghost, R rotate, RMB cancel, X mark for deconstruction, T drag a terrain-clear rectangle. Robots build the queue; within 4 m the suit builds by hand | |
+| A/D move, W or Space jump, Shift sprint, hold Space in the air for the jetpack (with the reactor on your back it only brakes the fall). **S** drop through the deck you stand on | W main engines (Z lock full, X cut), A/D rotate, Q/E strafe, S retro (RCS) |
+| Mouse aim (the headlamp follows; the laser swings after it, late). **LMB**: with a placeable item on the cursor, place it; with nothing on the cursor, the ship laser (it cuts ground and it is the weapon); on a machine, open it | LMB autocannon, RMB mining laser, wheel zoom (continuous, 0.01 m/px to 1e10 m/px) |
+| **RMB** take back: cancel a ghost, mark a machine to be taken apart (the suit does it within 4 m, robots anywhere), lift a deck; anywhere else, lay the selected soil, basalt or iron as ground | M map (local, planet system, star system), Tab focus (ship, target, depot), T target |
+| **E** (or I) inventory and crafting: LMB move or drag, RMB split, Shift quick move; click a recipe to craft it into the inventory on the arm (Shift x5), click a queued job to cancel, RMB a placeable recipe to plan it. Only recipes whose inputs you have seen are shown | `,` `.` time (x2, x4 under thrust; x10 to x100,000 on rails), N prediction on/off |
+| 1-9 or wheel: hotbar slot. A slot with a machine, a belt or a deck in it puts that on the cursor. **Q** pipette: what is under the cursor goes on the cursor (the slot that holds it; in blueprint mode a plan if you hold none); on nothing, clears the cursor. **R** rotate (belts) | B hangar, P ascent autopilot (from the pad), O story log, F1 dev menu |
+| **Tab** (or B) blueprint mode, for planning. The hotbar stays; a dashed row above it lists everything you can make. LMB: what you hold is placed, what you do not hold becomes a ghost and an order for the ship AI. **T** drag a rectangle of ground for the robots to cut. Tab again leaves | |
+| **F** use: at the wreck unbolt the laser, pull the reactor, open the ship hold; a machine, chest or cache, a terminal, an audio log, a lore stone; board the finished rocket | |
+| **X** set the reactor down / lift it. **G** stand the laser on its legs as a turret / take it back. **V** (hold) gather loose matter within reach. **Z** drop the selected stack | |
 | **C** combat mode (the laser, or a round 2 gun if a dev scenario gave you one: RMB aim, R reload) | |
-| **J** the ship AI: build queue (arrows reorder, x cancels), logistics with the reason for every route, stock targets (+, -, x, and a grid to add more). **M** out to the whole planet and back; **-** and **=** zoom out and in by hand | |
-| F headlamp, L story log, Esc close window, F1 dev menu (scenarios, save, export, import) | |
+| **J** the ship AI: build queue (arrows reorder, x cancels), logistics with the reason for every route, what every robot is doing, stock targets (+, -, x, and a grid to add more). **M** out to the whole planet and back; **-** and **=** zoom | |
+| **L** headlamp, O story log, Esc close window, F1 dev menu (scenarios, save, export, import) | |
+
+Keys that moved in round 5, and why: **Tab** was the inventory and is blueprint mode (Leif's ask); **E** was "use" and
+is the inventory (Factorio), so use is **F**; the headlamp went from F to **L** and the story log from L to **O**;
+**Q** was the reactor and is the pipette, so the reactor is **X**; drop went from X to **Z**; marking a machine for
+deconstruction was X in the old blueprint mode and is the right button. B and I still work as second keys for Tab and E.
 
 ## What is simulated
+
+Round 5, robustness:
+
+- **The field stays a distance field.** The terrain is a byte of signed distance per 0.125 m sample (saturating at
+  half a metre) and a byte of material. A brush (`world.shape`) writes only the samples it covers; one step outside
+  a filled floor the old value still said "half a metre from anything", and beside a fresh cut the rock still said
+  "deep inside". `redist` (in `world.js`) runs after every edit over the edited box and five samples round it: the
+  samples that carry the surface (within half a sample of it, or next to a change of sign) are kept bit for bit, so
+  the iso-line and the mass in every sample are unchanged; every other sample gets the chamfer distance to them. A
+  test reads the field 0.1 to 0.4 m off a filled floor and off a dug hole (error under 3 cm) and adds the mass up.
+- **The body.** `player.js`: a capsule 0.6 m wide and 1.8 m tall, felt at eighteen outline points (five under the
+  feet, ten up the sides, three over the head). A point inside rock is pushed out along the field's gradient there,
+  deepest first, up to five times a step. Ground under a foot point that is walkable (normal within 45 degrees of
+  up) lifts the body straight up, so standing on a slope does not creep; a low step or a steep bank the legs can
+  take is stepped onto when you push into it; anything else is a wall or a slide. The move is cut into steps of at
+  most 8 cm (60 m/s at 120 Hz is seven of them). The last free position is remembered: a body that ends up more
+  than 0.2 m deep all the same (ground laid on top of it) goes back there. A body that has stopped with a foot on
+  a steep hold, or with rock against both sides (wedged in a cut 0.9 m wide), or that gravity has simply not
+  moved for a quarter of a second, counts as standing: it can jump and climb out instead of hanging there. The two layers of forest in front of the play plane fade when the camera
+  goes below the ground, so down a shaft you see the shaft. Tests: terminal velocity onto a floor
+  half a metre thick, 60 m/s sideways into a wall half a metre thick, terminal velocity onto a deck, and onto ground
+  dug a moment before.
+- **Decks** (`layers.js`). A deck is grating at the top of one 0.5 m cell, kept in its own sparse map, drawn in
+  front of the rock. It is one-way: the body lands on it when its feet cross the deck's height going down, passes
+  it going up, and ignores it while S is held. It needs support (rock or a deck beside it, rock or a deck under it),
+  machines can stand on it, loose rock falls through the grating. An item: 2 kg of iron makes four. Saved.
+- **The back wall** is a bit in the material byte (`WALL`). It is set for rock deeper than 0.45 m under the
+  surface and for rock laid down as part of the world (the outcrop of the slice), never changed by digging, and so
+  saved with the terrain. The shader draws it wherever the sample is air: the rock's own texture, darker, lit by
+  the light map plus a small floor of its own, so a cut with no lamp in it is still rock and not a hole in the
+  picture. Ground you lay by hand in the open has no wall behind it.
+- **Rock** (`matter.js`). Every loose body (cut rock, ore, a dropped kit, biomass) is a rigid convex polygon: a box
+  with four chamfered corners, eight vertices, sized so its area times the 2 cm slab times the density is its mass;
+  the renderer draws the same polygon (sprite shape 14), so what you see is what collides. Per 120 Hz step, up to
+  four sub-steps when something is fast: gravity; contacts (each vertex and the midpoints of the long sides against
+  the field; polygon against polygon by separating axes with a clipped two-point manifold; a 1.6 m grid as broad
+  phase); eight iterations of sequential impulses with Coulomb friction 0.65, restitution 0.18 above 1.2 m/s, and a
+  speculative margin against the ground; overlap is taken out of positions, not speeds, so a resting pile gains no
+  energy; angular damping in contact. A body slower than 0.15 m/s for 0.4 s, or wedged in place for a second,
+  sleeps: it costs nothing and is solid to the others. It wakes when the ground beside it is edited, when what it
+  leans on is taken or wakes after losing its own support, or when it is hit. **Fracture**: the largest normal
+  impulse a body took in a step, over its mass, is a change of speed; over 5.5 m/s + 30 / kg (a 60 kg rock: a 2 m
+  fall; a 4 kg one: hardly ever) the rock splits across its long axis into two pieces, three if the blow was much
+  harder, each a new body with the parent's outer corners and fresh ones along the break, amounts adding up to the
+  parent's to the last bit. Kits and organic matter never break. Above 260 bodies, resting gravel of one kind that
+  touches merges into heaps so the count stays bounded. Radial gravity comes with the polar field: -y is toward the
+  centre everywhere. Measured on this VM (software GL, one core): 120 rocks dropped at once, 250 bodies after
+  breaking, 0.7 ms a step on average, all asleep by 14 s.
+- **Robots** (`robots.js`, `nav.js`). The job states are what they were (idle, fetch, go, work for the build
+  queue; cfetch, cgo for carrying; haul to unload; charge), and each has one exit when it fails. New: *the way*: a
+  drone flies straight when the line is free and otherwise along an A* path through the air on a 0.25 m grid
+  (bounded search, corners cut where the line is free), replanned when the target moves; the rock pushes it off
+  before it touches and it is never inside it. A cut the laser made (0.9 m wide) can be flown, so a drone goes into
+  a cavity for a rock that lies under a ledge; what it finds no way to is left to the hauler for four minutes. *Stuck*: every 1.5 s it checks that it got nearer; if not it plans
+  again; after four times, or three searches with no way, or 75 s on one leg whatever the reason, it gives the job up,
+  leaves that target alone for 25 to 40 s (so the hauler or another drone can try) and goes home. The ground
+  hauler, which walks the rock and so can walk into a cave and not find the way out, gets the same net: 55 s on
+  one leg or two failures running, and it folds its legs and jets back to the wreck on its lift thrusters.
+  *The hold is finite* (24 slots): nothing is carried to it that it has no room for (it used to be set down at
+  the hatch and carried again, for ever); the HUD says when the hold is full. What a robot cannot unload is set
+  down beside it, never lost. *Reservations*: a kit a drone is on its way to fetch
+  stays promised to it across planning rounds; a ghost, a loose body and a machine input each have one taker.
+  *Intent*: over every working robot, in the HUD list and in the J window, one line: "fetching iron ore for the
+  hold", "carrying the chest to the site", "building the chest 40%"; a row of marks runs to its target. A drone
+  tops up from neighbouring pieces of the same stuff before it flies back. What the suit holds is the player's: the
+  AI no longer prints stock-target goods on the arm from it (it still does for something you planned), and a robot
+  with leftovers unloads into a store, not into your hands.
+- **Inventory and placing** (`blueprint.js`, `ui.js`). One slot holds one stack of one item. Machines, belts and
+  decks are items with a recipe; the arm crafts them into the inventory (eight times slower than the machine that
+  specialises in it), the wreck's fabricator and assemblers make them for the base. The selected slot is the
+  cursor: LMB places within 8 m and takes one from the stack. In blueprint mode (Tab) the cursor can also be a plan
+  picked from the dashed row, by Q, or by RMB on a recipe: if you hold the item the click places it, if not it puts
+  down a ghost (a blue hologram in a dashed frame with corner marks, an amber dot once its item is on site), which
+  is an order in the ship AI's queue (round 4). Placing the item on its own ghost builds it. **What is shown**: a
+  recipe appears in the crafting menu, and its product in the plan row, when every input has been in your hands or
+  in the base's stores (`S.known`, saved). At a fresh start that is what iron and copper make; the furnace appears
+  when you first pick up basalt, the hub with the first lumen.
+
 
 Round 4, the planet:
 
@@ -256,7 +374,7 @@ From round 2, unchanged unless noted:
   reactor are), the ship hold, every loose body, stock targets, machines and their buffers, chests, blueprints,
   robots and their loads, kills, site state, hive alert, pollution, story beats seen, and the space state.
   `src/save.js` is the only module that touches storage, through an adapter `{ load(slot), save(slot, blob), list() }`
-  and a versioned schema: version 4, with migrations from round 2's version 2 (the laser drill item becomes the
+  and a versioned schema: version 5 (round 5 adds decks, the seen-items list and the shape and pose of loose bodies; a version 4 save loads: `tools/fixtures/save-v4.json` is one, written by the round 4 build, and the check loads it), with migrations from round 2's version 2 (the laser drill item becomes the
   kit on your back; tested) and round 3's version 3 (a flat world maps onto the planet: x is still metres from the
   crash site, edited chunks are folded onto the circle).
 - Death: until you build the bio-printer, dying restarts you at the crash site; once it exists you respawn there.
@@ -286,9 +404,11 @@ plane), `backdrop.js` (sky, seven layers behind, two in front, background animal
 skitters), `player.js` (body and rig), `power.js` (pure: power budget, network reach, load), `kit.js` (laser,
 reactor, turret, cables, the wreck), `matter.js` (loose bodies), `supply.js` (stock targets, demand, carrying jobs),
 `creatures.js` (species, `stance`, herds), `env.js` (noise, pollution), `hive.js`, `structures.js` with
-`ruins-gen.js`, `hive-gen.js`, `base-gen.js`, `sites.js`, `factory.js`, `blueprint.js`, `robots.js`.
-`src/space/*` (orbit, ship, belt, combat, view). `tools/check.mjs`, `tools/ui-flow.mjs`, `tools/shot.mjs`.
-Plan, decisions and lore notes: `PLAN.md`. Leif's asks: `docs/ROUND4.md`, `docs/ROUND3.md`. Check result and proof shots:
+`ruins-gen.js`, `hive-gen.js`, `base-gen.js`, `sites.js`, `factory.js`, `blueprint.js` (placing, ghosts, blueprint
+mode), `layers.js` (decks), `robots.js`, `nav.js` (the drones' path search).
+`src/space/*` (orbit, ship, belt, combat, view). `tools/check.mjs`, `tools/ui-flow.mjs`, `tools/play.mjs`,
+`tools/shot.mjs`, `tools/fixtures/save-v4.json` (a save written by the round 4 build, loaded by the check).
+Plan, decisions and lore notes: `PLAN.md`. Leif's asks: `docs/ROUND5.md`, `docs/ROUND4.md`, `docs/ROUND3.md`. Check result and proof shots:
 `docs/CHECK.md`, `docs/shots/`.
 
 ## Licence
@@ -296,6 +416,29 @@ Plan, decisions and lore notes: `PLAN.md`. Leif's asks: `docs/ROUND4.md`, `docs/
 Apache-2.0, see `LICENSE`. Dependencies: three (MIT), vite (MIT, build only), puppeteer-core (Apache-2.0, check only).
 
 ## Cut or simplified (said plainly)
+
+Round 5:
+
+- **Rock breaks, the ground does not fall.** Loose rock fractures on impact. The terrain itself is still only cut by
+  the laser, the miner and the robots: an overhang you undercut stays up; there is no collapse of unsupported
+  ground into rubble. The laser does not split a loose rock it sweeps over either.
+- The rock solver has no warm starting and treats a sleeping body as fixed. Tall thin stacks are softer than in a
+  full engine; piles, which is what cutting makes, settle and stay. The body shape is one family (a chamfered box),
+  so a break is always across the long axis, never a diagonal shard. The player and the creatures do not collide
+  with loose rock (you walk through a pile, as before); rock falls through decks.
+- The body is felt at points, not as a swept shape: a spike of rock thinner than the gap between two outline
+  points (about 0.3 m) can reach in between them. The step limit and the last-free-place rule keep it from ever
+  ending inside the ground. There is no jet downward; S only lets go of a deck.
+- Decks carry you and machines, nothing else: robots fly through them, the hauler does not walk on them, creatures
+  ignore them. A deck may be laid wherever it has support; it has no strength limit.
+- The drones' path search is bounded (10 m of margin round both ends, 26,000 nodes): a way that needs a longer
+  detour than that is "no way", and the job waits for the hauler or for you. The hauler's own walk is round 4's
+  wall-following; what is new is that it notices when it is lost and jets home. Robots do not collide with loose
+  rock or with each other.
+- "What you can make" is decided by what has been seen, not by a tech tree: there is no research. The wall block is
+  plan-only (in the row when iron is known); by hand, iron in the selected slot is laid as plate with RMB.
+- Blueprint mode has no copy, paste or stamp of several things at once: one cursor, one thing.
+- The old `B` blueprint bar (number keys picking buildings) is gone; `tools/ui-flow.mjs` drives the new keys.
 
 Round 4:
 

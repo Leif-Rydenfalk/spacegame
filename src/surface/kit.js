@@ -28,6 +28,7 @@ export const K = {
 };
 K.hold.title = 'ship hold';
 const nv = [0, 0];
+const HOLDWIN = { kind: 'hold', title: 'ship hold', inv: K.hold };      // the hold as a window: the same grid as a chest
 export const hasLaser = () => K.laser.state === 'held', hasReactor = () => K.reactor.state === 'carried';
 export const kitKg = () => (hasReactor() ? REACTOR_KG : 0) + (hasLaser() ? LASER_KG : 0);
 // where the reactor is, and where its cable port is
@@ -41,28 +42,28 @@ export function kitReset(mode) {            // mode: 'wreck' = everything still 
 }
 // a timed action: the body is busy, a hand reaches for (x, y), and when the time is up it happens
 function act(kind, T, x, y, done) { S.P.act = { kind, t: 0, T, x, y, done }; audio.play('click'); }
-// E at the wreck or at a piece of the kit. Returns true when something was done.
+// F at the wreck or at a piece of the kit. Returns true when something was done.
 export function kitUse() {
   const P = S.P; if (P.act) return true; const near = (q, r = 2.2) => Math.hypot(q[0] - P.x, q[1] - P.y - 0.9) < r;
   if (S.crash && K.laser.state === 'ship' && near(SHIP.mount, 2.6)) { act('unbolt the ship laser', 1.8, SHIP.mount[0], SHIP.mount[1], () => { K.laser.state = 'held'; events.emit('laserTaken'); audio.play('place'); }); return true; }
   if (S.crash && K.reactor.state === 'ship' && near(SHIP.bay)) { act('pull the reactor', 2.6, SHIP.bay[0], SHIP.bay[1], () => { K.reactor.state = 'carried'; events.emit('reactorPulled'); audio.play('groan'); G.shake += 0.1; }); return true; }
-  if (S.crash && near(SHIP.hatch, 2)) { S.open = K.hold; S.uiOpen = true; return true; }
+  if (S.crash && near(SHIP.hatch, 2)) { S.open = HOLDWIN; S.uiOpen = true; return true; }
   return false;
 }
 export function kitHint() {
   const P = S.P, near = (q, r = 2.2) => Math.hypot(q[0] - P.x, q[1] - P.y - 0.9) < r, l = K.laser, r = K.reactor;
   if (P.act) return `${P.act.kind}  ${(P.act.t / P.act.T * 100).toFixed(0)}%`;
-  if (S.crash && l.state === 'ship' && near(SHIP.mount, 2.6)) return 'e  unbolt the ship laser from its hardpoint';
-  if (S.crash && r.state === 'ship' && near(SHIP.bay)) return `e  pull the reactor out of its bay (${REACTOR_KG} kg)`;
-  if (S.crash && near(SHIP.hatch, 2)) return 'e  open the ship hold';
-  if (r.state === 'ground' && Math.hypot(r.x - P.x, r.y - P.y) < 1.8) return 'q  lift the reactor';
+  if (S.crash && l.state === 'ship' && near(SHIP.mount, 2.6)) return 'f  unbolt the ship laser from its hardpoint';
+  if (S.crash && r.state === 'ship' && near(SHIP.bay)) return `f  pull the reactor out of its bay (${REACTOR_KG} kg)`;
+  if (S.crash && near(SHIP.hatch, 2)) return 'f  open the ship hold';
+  if (r.state === 'ground' && Math.hypot(r.x - P.x, r.y - P.y) < 1.8) return 'x  lift the reactor';
   if (l.state === 'turret' && Math.hypot(l.x - P.x, l.y - P.y) < 1.8) return 'g  take the laser off its legs';
   return '';
 }
-// Q sets the reactor down or lifts it; G stands the laser on its legs or takes it back
+// X sets the reactor down or lifts it; G stands the laser on its legs or takes it back
 function keys() {
   const P = S.P, l = K.laser, r = K.reactor; if (P.act || P.dead || S.uiOpen) return;
-  if (input.hit('q')) {
+  if (input.hit('x')) {
     if (r.state === 'carried') act('set the reactor down', 0.9, P.x + P.face * 0.6, P.y + 0.3, () => { r.state = 'ground'; r.x = P.x + P.face * 0.75; r.y = P.y + 0.4; r.vy = 0; events.emit('reactorDown'); audio.play('thud'); });
     else if (r.state === 'ground' && Math.hypot(r.x - P.x, r.y - P.y) < 1.8) act('lift the reactor', 1.6, r.x, r.y + 0.5, () => { r.state = 'carried'; audio.play('groan'); });
     else if (r.state === 'ground') S.say('the reactor is ' + Math.hypot(r.x - P.x, r.y - P.y).toFixed(0) + ' m away', 2);

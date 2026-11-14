@@ -1,7 +1,7 @@
 {
   "name": "spacegame",
-  "version": "0.4.0",
-  "description": "spacegame demo 1, round 4: a whole round planet with radial gravity and a camera that turns with it, an automation-first base (auto-built queue, AI-laid conveyors, ground haulers, power budget), and a real-scale orbital act, one page, three.js",
+  "version": "0.5.0",
+  "description": "spacegame demo 1, round 5: the robustness round. Collision that holds on worked ground at any speed, decks you drop through and a back wall behind every cut, rigid-body rock that breaks, drones that find their way and say what they do, one Factorio-like inventory you place from, and Tab for blueprint mode. On a whole round planet with an automation-first base and a real-scale orbital act, one page, three.js",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
@@ -9,7 +9,8 @@
     "dev": "vite --port 5200",
     "build": "vite build",
     "preview": "vite preview --port 5200",
-    "check": "node tools/check.mjs"
+    "check": "node tools/check.mjs",
+    "play": "node tools/play.mjs"
   },
   "dependencies": { "three": "0.170.0" },
   "devDependencies": { "vite": "5.4.11", "puppeteer-core": "22.15.0" }

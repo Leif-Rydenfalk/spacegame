@@ -27,7 +27,7 @@ function cacheInv(p) {
   else { const r = rng(Math.floor(hash(p.site.slot, p.i, 72) * 1e9)); for (const [id, a, b] of LOOT[p.loot]) { const n = a + r() * (b - a); inv.add(p.inv, id, id.includes('rounds') || id === 'shells' || a === b || id.includes('cell') ? Math.round(n) : +n.toFixed(1)); } }
   return p.inv;
 }
-const USE = { xterm: 'e  read the stone', terminal: 'e  read terminal', audiolog: 'e  play audio log', cache: 'e  open cache' };
+const USE = { xterm: 'f  read the stone', terminal: 'f  read terminal', audiolog: 'f  play audio log', cache: 'f  open cache' };
 export function stepSites(dt) {
   const P = S.P; sites.near = null; sites.hint = ''; sites.inside = null; let bd = 2.2;
   for (const st of structsIn(P.x - 30, P.x + 30)) {

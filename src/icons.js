@@ -44,6 +44,8 @@ const D = {
   belt(g) { B(g, 'M6 30 H58 V40 H6 Z', DK); B(g, 'M10 40 H16 V50 H10 Z M48 40 H54 V50 H48 Z', ST); Ln(g, 'M16 35 H26 M30 35 H40', LT, 2); Em(g, 'M44 29 L52 35 L44 41 Z', AMB); },
   assembler(g) { B(g, 'M8 20 H56 V54 H8 Z', ST); B(g, 'M16 26 H48 V40 H16 Z', [10, 12, 15]); B(g, 'M6 16 H58 V21 H6 Z', DK); Ln(g, 'M32 26 V35', LT, 2); Gl(g, 32, 37, 8, [140, 220, 255], 0.9); },
   chest(g) { B(g, 'M10 24 H54 V52 H10 Z', ST); B(g, 'M8 18 H56 V26 H8 Z', DK); B(g, 'M16 24 H20 V52 H16 Z M44 24 H48 V52 H44 Z', DK); Gl(g, 32, 34, 5, AMB, 0.9); },
+  platform(g) { B(g, 'M6 24 H58 V31 H6 Z', LT); B(g, 'M10 31 H54 V35 H10 Z', DK); B(g, 'M14 35 H18 V46 H14 Z M30 35 H34 V46 H30 Z M46 35 H50 V46 H46 Z', ST); Ln(g, 'M10 27 H54', HULL, 1, 0.6); },
+  wall(g) { B(g, 'M14 14 H50 V50 H14 Z', ST); Ln(g, 'M14 32 H50 M32 14 V32 M24 32 V50 M40 32 V50', [0, 0, 0], 1.5, 0.45); },
   hub(g) { B(g, 'M8 44 H56 V56 H8 Z', ST); B(g, 'M14 16 H18 V44 H14 Z M46 16 H50 V44 H46 Z', LT); B(g, 'M12 12 H52 V16 H12 Z', DK); B(g, 'M24 26 H40 V32 H24 Z', HULL); Ln(g, 'M18 27 H24 M40 27 H46', LT, 2); Gl(g, 32, 40, 9, CYA, 0.8); },
   'bio-printer'(g) { B(g, 'M14 8 H50 V16 H14 Z M14 48 H50 V56 H14 Z', ST); B(g, 'M20 16 H44 V48 H20 Z', [14, 40, 42]); Gl(g, 32, 32, 18, CYA, 0.6); Em(g, 'M30 20 H34 V44 H30 Z', CYA); },
   pad(g) { B(g, 'M6 50 H58 V56 H6 Z', ST); Ln(g, 'M14 50 V8 M20 50 V8 M14 40 L20 32 M14 28 L20 20 M14 16 L20 8', LT, 1.5); B(g, 'M32 50 V22 Q38 6 44 22 V50 Z', HULL); Gl(g, 38, 28, 4, AMB, 0.9); },

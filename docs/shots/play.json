@@ -1,0 +1,466 @@
+{
+ "at": "2026-11-14T18:17:00.337Z",
+ "result": "PASS",
+ "log": [
+  {
+   "check": "fresh default start: normal mode, nothing in the hands",
+   "ok": true,
+   "info": [
+    "build",
+    "ship",
+    "ship",
+    "o2 cell,power cell",
+    0
+   ]
+  },
+  {
+   "check": "at the start the crafting menu shows what iron and copper make, and no furnace, hub or cell",
+   "ok": true,
+   "info": [
+    "part",
+    "rifle rounds",
+    "shells",
+    "belt",
+    "chest",
+    "platform",
+    "miner",
+    "assembler",
+    "antenna",
+    "pad",
+    "rifle"
+   ]
+  },
+  {
+   "check": "a 30 m fall ends standing on the ground",
+   "ok": true,
+   "info": {
+    "label": "30 m",
+    "top": 22.8,
+    "deepest": 0,
+    "t": 2.62,
+    "end": [
+     true,
+     0,
+     0.133,
+     -0.02,
+     false
+    ]
+   }
+  },
+  {
+   "check": "a fall at terminal velocity (60 m/s) does not go through the ground",
+   "ok": true,
+   "info": {
+    "label": "terminal velocity",
+    "top": 60,
+    "deepest": 0,
+    "t": 10.44,
+    "end": [
+     true,
+     0,
+     0.134,
+     -0.02,
+     false
+    ]
+   }
+  },
+  {
+   "check": "f unbolts the ship laser",
+   "ok": true
+  },
+  {
+   "check": "f pulls the reactor",
+   "ok": true,
+   "info": 182
+  },
+  {
+   "check": "the hold opens with f and iron moves to the suit with shift-click",
+   "ok": true,
+   "info": "o2 cell 1,power cell 1,iron 14"
+  },
+  {
+   "check": "e closes the window",
+   "ok": true
+  },
+  {
+   "check": "the antenna gets built and the ship robots wake",
+   "ok": true,
+   "info": {
+    "s": 0.5,
+    "robots": 3
+   }
+  },
+  {
+   "check": "the laser cuts the outcrop and a pit, and rock falls out",
+   "ok": true,
+   "info": {
+    "cutT": 23.400000000000002,
+    "pitT": 17.599999999999998,
+    "dug": 2054,
+    "outcrop": [
+     false,
+     true
+    ],
+    "pit": [
+     false,
+     true
+    ],
+    "bodies": 221,
+    "loose": 1788
+   }
+  },
+  {
+   "check": "the back wall stays behind what was cut (outcrop and pit)",
+   "ok": true,
+   "info": {
+    "dug": 2054,
+    "outcrop": [
+     false,
+     true
+    ],
+    "pit": [
+     false,
+     true
+    ],
+    "bodies": 221,
+    "loose": 1788
+   }
+  },
+  {
+   "check": "the fallen rock lies still within 12 s of the last cut",
+   "ok": true,
+   "info": {
+    "s": 0,
+    "bodies": 221,
+    "awake": 5,
+    "moving": 0,
+    "inRock": 0,
+    "which": [],
+    "breaks": 0,
+    "spin": 0
+   }
+  },
+  {
+   "check": "basalt gathered by hand with v",
+   "ok": true,
+   "info": {
+    "byHand": 69.1,
+    "cooled": 0,
+    "deaths": [],
+    "basalt": 69.1,
+    "hp": 100,
+    "died": 0,
+    "unlockedBefore": true,
+    "unlockedNow": true
+   }
+  },
+  {
+   "check": "the crafting menu now shows the furnace, and exactly the recipes whose inputs have been seen",
+   "ok": true,
+   "info": {
+    "menu": [
+     "iron",
+     "part",
+     "rifle rounds",
+     "shells",
+     "o2 cell",
+     "belt",
+     "chest",
+     "platform",
+     "furnace",
+     "miner",
+     "assembler",
+     "antenna",
+     "pad",
+     "rifle",
+     "shotgun"
+    ],
+    "known": [
+     "basalt",
+     "biomass",
+     "copper",
+     "fibre",
+     "iron",
+     "iron ore",
+     "o2 cell",
+     "power cell",
+     "resin"
+    ]
+   }
+  },
+  {
+   "check": "the arm crafts a furnace and four decks into the inventory",
+   "ok": true,
+   "info": {
+    "s": 62.5,
+    "queued": [
+     "furnace",
+     29.1
+    ],
+    "inv": "o2 cell 1,power cell 1,iron 12,basalt 29.1,furnace 1,platform 4"
+   }
+  },
+  {
+   "check": "the furnace is in a hotbar slot and a number key selects it",
+   "ok": true
+  },
+  {
+   "check": "placing the furnace from the inventory puts it down and consumes the item",
+   "ok": true,
+   "info": {
+    "cell": 11,
+    "placed": [
+     1,
+     0,
+     0,
+     null
+    ]
+   }
+  },
+  {
+   "check": "a second click places nothing (there is no second furnace); the empty hand opens the furnace it clicked",
+   "ok": true,
+   "info": [
+    1,
+    true,
+    "furnace"
+   ]
+  },
+  {
+   "check": "decks are laid from the inventory over the pit",
+   "ok": true,
+   "info": {
+    "span": [
+     -4,
+     -3
+    ],
+    "decks": [
+     2,
+     2
+    ]
+   }
+  },
+  {
+   "check": "you stand on a deck with air under it",
+   "ok": true,
+   "info": [
+    true,
+    true,
+    0,
+    true
+   ]
+  },
+  {
+   "check": "s drops you through the deck onto the rock below",
+   "ok": true,
+   "info": [
+    false,
+    true,
+    -1.18,
+    0,
+    1
+   ]
+  },
+  {
+   "check": "a 20 m fall lands on the deck, not through it",
+   "ok": true,
+   "info": {
+    "label": "onto the deck",
+    "top": 18.6,
+    "deepest": 0,
+    "t": 2.13,
+    "end": [
+     true,
+     0,
+     -0.333,
+     0,
+     true
+    ]
+   }
+  },
+  {
+   "check": "tab turns blueprint mode on and its row lists only what can be made yet",
+   "ok": true,
+   "info": [
+    "belt",
+    "miner",
+    "furnace",
+    "assembler",
+    "chest",
+    "antenna",
+    "platform",
+    "wall",
+    "pad"
+   ]
+  },
+  {
+   "check": "a chest you do not hold goes down as a ghost",
+   "ok": true,
+   "info": [
+    "chest",
+    0,
+    0,
+    "chest"
+   ]
+  },
+  {
+   "check": "tab leaves blueprint mode",
+   "ok": true
+  },
+  {
+   "check": "the ship ai has the chest made and a drone builds it",
+   "ok": true,
+   "info": {
+    "s": 17,
+    "robotBuilt": 1,
+    "fabDone": 18,
+    "queue": []
+   }
+  },
+  {
+   "check": "drones fetch loose ore, deliver it to the hold, and the fabricator crafts from it",
+   "ok": true,
+   "info": {
+    "s": 0,
+    "delivered": 17,
+    "ore": [
+     [
+      "iron ore",
+      43.7,
+      "inv"
+     ],
+     [
+      "iron ore",
+      45,
+      "inv"
+     ],
+     [
+      "iron ore",
+      48.3,
+      "inv"
+     ],
+     [
+      "iron ore",
+      45.6,
+      "inv"
+     ]
+    ],
+    "gave": [
+     {
+      "id": 1,
+      "state": "cfetch",
+      "job": "carry fibre",
+      "at": [
+       14.9,
+       1.5
+      ],
+      "to": [
+       13.8,
+       2.2
+      ],
+      "why": "no way"
+     },
+     {
+      "id": 2,
+      "state": "cfetch",
+      "job": "carry iron ore",
+      "at": [
+       -5.6,
+       2.6
+      ],
+      "to": [
+       13.4,
+       1.8
+      ],
+      "why": "no way"
+     },
+     {
+      "id": 2,
+      "state": "cfetch",
+      "job": "carry iron ore",
+      "at": [
+       1.8,
+       2.5
+      ],
+      "to": [
+       13.7,
+       1.9
+      ],
+      "why": "no way"
+     },
+     {
+      "id": 2,
+      "state": "cfetch",
+      "job": "carry iron ore",
+      "at": [
+       9.1,
+       2.1
+      ],
+      "to": [
+       13.9,
+       1.8
+      ],
+      "why": "no way"
+     },
+     {
+      "id": 2,
+      "state": "cfetch",
+      "job": "carry iron ore",
+      "at": [
+       11.1,
+       2
+      ],
+      "to": [
+       13,
+       1.8
+      ],
+      "why": "no way"
+     },
+     {
+      "id": 3,
+      "state": "cfetch",
+      "job": "carry iron ore",
+      "at": [
+       9.3,
+       0.8
+      ],
+      "to": [
+       0,
+       0
+      ],
+      "why": "no progress"
+     }
+    ],
+    "loaded": 101,
+    "gaveUp": 10,
+    "fabDone": 18,
+    "holdOre": 400.7,
+    "iron": 24.4,
+    "robots": [
+     "drone docked",
+     "drone carrying 10 kg iron to the hold",
+     "crawler fetching resin for the hold"
+    ],
+    "looseOre": {
+     "n": 41,
+     "kg": 341,
+     "claimed": 0,
+     "skipped": 3,
+     "noDrone": 0,
+     "hot": 0,
+     "unlinked": 0
+    },
+    "holdRoom": 2159.2703125,
+    "full": false,
+    "orders": [
+     "power cell by ship: waits for lumen: none loose or stored"
+    ]
+   }
+  },
+  {
+   "check": "no console errors",
+   "ok": true,
+   "info": []
+  }
+ ]
+}

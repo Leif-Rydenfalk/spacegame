@@ -36,7 +36,7 @@ function genChunk(cx, cy) {
           if (v < 0.5 && v > -0.5) v += (noise2(x * 3.1, y * 3.1, 77) - 0.5) * 0.11 * Math.min(1, Math.abs(x) / 6 + (depth > 1 ? 1 : 0));
           let k = M.BASALT;
           if (depth < soil) k = M.SOIL; else if (depth < 40 && bl(Li) > 0.7) k = M.IRON; else if (depth > 6 && bl(Lc) > 0.72) k = M.COPPER; else if (depth > 3.5 && bl(Ll) > 0.73) k = M.LUMEN; else if (y < obs) k = M.OBSIDIAN;
-          m[q] = k | (depth > 0.9 ? WALL : 0);
+          m[q] = k | (depth > 0.45 ? WALL : 0);
         }
         F[q] = v;
       }
@@ -67,9 +67,35 @@ const gd = (ix, iy) => chunk(ix >> 6, iy >> 6).d[((iy & 63) << 6) | (ix & 63)];
 const gm = (ix, iy) => chunk(ix >> 6, iy >> 6).m[((iy & 63) << 6) | (ix & 63)];
 const circle = (cx, cy, r) => (x, y) => Math.hypot(x - cx, y - cy) - r;
 const NO = {};
+// After an edit the field near it is made a distance field again. A brush only writes the samples it covers, so
+// without this the air a step away from a filled floor still says "half a metre from anything" and the rock beside a
+// cut still says "deep inside": everything that asks the field how far the ground is (the player, robots, the
+// hauler's feet, falling rock) got a wrong answer on ground that had been worked. The samples that carry the surface
+// (within half a sample of it, or next to a change of sign) are kept exactly as they are, so the iso-line and the
+// mass in every sample do not change; the others get the chamfer distance to them, out to the half metre the byte holds.
+let RW = new Float32Array(0), RB = new Uint8Array(0), RF = new Uint8Array(0);
+const W1 = CELL * 254, W2 = W1 * Math.SQRT2;
+function redist(i0, j0, i1, j1) {
+  const B = 5, x0 = i0 - B, y0 = j0 - B, W = i1 - i0 + 1 + 2 * B, H = j1 - j0 + 1 + 2 * B, n = W * H; if (n > RW.length) { RW = new Float32Array(n); RB = new Uint8Array(n); RF = new Uint8Array(n); }
+  for (let j = 0, q = 0; j < H; j++) for (let i = 0; i < W; i++, q++) RB[q] = gd(x0 + i, y0 + j);
+  for (let j = 0, q = 0; j < H; j++) for (let i = 0; i < W; i++, q++) {
+    const b = RB[q], s = b > 128; let fix = i === 0 || j === 0 || i === W - 1 || j === H - 1 || (b > 112 && b < 144);
+    if (!fix) fix = (RB[q - 1] > 128) !== s || (RB[q + 1] > 128) !== s || (RB[q - W] > 128) !== s || (RB[q + W] > 128) !== s;
+    RF[q] = fix ? 1 : 0; RW[q] = fix ? Math.abs(b - 128) : 1e9;
+  }
+  const relax = (q, o, w) => { const v = (RB[o] > 128) === (RB[q] > 128) ? RW[o] + w : Math.max(4, w - RW[o]); if (v < RW[q]) RW[q] = v; };
+  for (let pass = 0; pass < 2; pass++) {
+    for (let j = 1; j < H - 1; j++) for (let i = 1; i < W - 1; i++) { const q = j * W + i; if (RF[q]) continue; relax(q, q - 1, W1); relax(q, q - W, W1); relax(q, q - W - 1, W2); relax(q, q - W + 1, W2); }
+    for (let j = H - 2; j > 0; j--) for (let i = W - 2; i > 0; i--) { const q = j * W + i; if (RF[q]) continue; relax(q, q + 1, W1); relax(q, q + W, W1); relax(q, q + W + 1, W2); relax(q, q + W - 1, W2); }
+  }
+  for (let j = 1, q = W + 1; j < H - 1; j++, q += 2) for (let i = 1; i < W - 1; i++, q++) {
+    if (RF[q]) continue; const b = RB[q], v = Math.min(127, Math.round(RW[q])), nb = b > 128 ? Math.max(144, 128 + v) : Math.min(112, 128 - v); if (nb === b) continue;
+    const ix = x0 + i, iy = y0 + j, c = chunk(ix >> 6, iy >> 6); c.d[((iy & 63) << 6) | (ix & 63)] = nb; c.mod = true;
+  }
+}
 
 export const world = {
-  chunks, rev: 0,
+  chunks, rev: 0, backWall: false,
   reset() { chunks.clear(); lastKey = NaN; last = null; this.rev++; },
   // signed density in metres at a point, bilinear; positive inside rock
   dens(x, y) {
@@ -115,9 +141,10 @@ export const world = {
       const c0 = cov(old), c1 = cov(nv);
       if (sign > 0 && c0 < 0.5 && mm !== mat) { if (acc !== NO) { acc[mm] = (acc[mm] || 0) + c0 * KG * MAT[mm].rho; acc[mat] = (acc[mat] || 0) - c1 * KG * MAT[mat].rho; } c.m[q] = mat | (c.m[q] & WALL); }
       else if (acc !== NO && c0 !== c1) acc[mm] = (acc[mm] || 0) + (c0 - c1) * KG * MAT[mm].rho;
+      if (sign > 0 && this.backWall && nv > 128) c.m[q] |= WALL;       // rock laid down as part of the world has the back wall behind it, like the rock that was always there
       c.d[q] = nv; c.mod = true; changed++;
     }
-    if (changed) this.rev++; return changed;
+    if (changed) { redist(i0, j0, i1, j1); this.rev++; if (this.onEdit) this.onEdit(x0, y0, x1, y1); } return changed;
   },
   dig(x, y, r, rate, acc, deny) { return this.shape(x - r, y - r, x + r, y + r, circle(x, y, r), -1, 0, rate, acc, deny); },
   fill(x, y, r, mat, rate, acc) { return this.shape(x - r, y - r, x + r, y + r, circle(x, y, r), 1, mat, rate, acc); },

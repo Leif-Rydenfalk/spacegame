@@ -40,6 +40,7 @@ export function planDemand(stock, targets, pending, kinds) {
 export function countStock() {
   const st = {}, add = I => { for (const s of I.slots) if (s) st[s.id] = (st[s.id] || 0) + s.n; };
   add(S.inv); if (S.crash) add(K.hold); for (const m of F.machines) { if (m.inv) add(m.inv); for (const k in m.out) st[k] = (st[k] || 0) + m.out[k]; }
+  for (const k in st) if (st[k] > 1e-6) S.known.add(k);      // what the base has seen is what it can show recipes for
   return st;
 }
 // what is already on its way: the arm's queue, ore in a furnace, a batch in an assembler, inputs waiting in a machine
@@ -57,32 +58,39 @@ const mpos = m => [(m.x + m.w / 2) * TS, (m.y + m.h) * TS + 0.5];
 // where an amount of an item can be fetched from, nearest to (x, y): a loose body first, then the hold, then a chest
 function sourceOf(item, x, y, taken) {
   let best = null, bd = 1e9;
-  for (const c of matter.list) if (c.id === item && !c.claim && !c.dumped && c.temp < 0.7 && !(c.skip > G.time) && !taken.has(c) && isLinked(c.x, c.y)) { const op = open(c); if (!op && !SUP.crawlers) continue; const d = Math.hypot(c.x - x, c.y - y) + (op ? 0 : 6); if (d < bd) { bd = d; best = { t: 'chunk', c, x: c.x, y: c.y + 0.5, n: c.n, ground: !op }; } }
+  for (const c of matter.list) if (c.id === item && !c.claim && !c.dumped && c.temp < 0.7 && !(c.skip > G.time) && !taken.has(c) && isLinked(c.x, c.y)) { const op = open(c), nd = c.noDrone > G.time; if (nd && !SUP.crawlers) continue; const d = Math.hypot(c.x - x, c.y - y) + (op ? 0 : 6); if (d < bd) { bd = d; best = { t: 'chunk', c, x: c.x, y: c.y + 0.5, n: c.n, ground: !op, noDrone: nd }; } }
   if (best) return best;
   if (S.crash && inv.count(K.hold, item) > 1e-6) return { t: 'inv', inv: K.hold, x: SHIP.hatch[0], y: SHIP.hatch[1] + 0.8, n: inv.count(K.hold, item) };
   for (const m of F.machines) if (m.kind === 'chest' && inv.count(m.inv, item) > 1e-6) return { t: 'inv', inv: m.inv, x: mpos(m)[0], y: mpos(m)[1], n: inv.count(m.inv, item) };
   return null;
 }
-// can a robot get a line on it? There has to be open air over it.
+// is there open air over it? What lies under a ledge is the ground hauler's first; a drone goes in for it when it finds
+// a way through the air (nav.js), and when it finds none the piece is marked noDrone for a while.
 const open = c => world.dist(c.x, c.y + c.r + 0.6) > 0.35 && !world.ray(c.x, c.y + c.r + 0.05, 0, 1, 1.5);
 // the open carrying jobs, most useful first. robotsBusy = jobs robots already have, so nothing is ordered twice.
+// kg-or-units of an item the ship hold can still take: its free slots and the unfilled part of its stacks of it
+export function holdRoom(id) { const d = ITEMS[id]; let r = 0; for (const s of K.hold.slots) r += !s ? d.cap : s.id === id ? Math.max(0, d.cap - s.n) : 0; return r; }
 export function carryJobs(busy) {
   const jobs = [], taken = new Set(), has = key => busy.has(key) || jobs.some(j => j.key === key), P = S.P;
-  const push = (src, dst, item, n, key, pri) => { if (!src || has(key)) return; if (src.t === 'chunk') taken.add(src.c); jobs.push({ kind: 'carry', src, dst, item, n: Math.min(n, src.n), key, pri, x: src.x, y: src.y, ground: !!src.ground }); };
+  const push = (src, dst, item, n, key, pri) => { if (!src || has(key)) return; if (src.t === 'chunk') taken.add(src.c); jobs.push({ kind: 'carry', src, dst, item, n: Math.min(n, src.n), key, pri, x: src.x, y: src.y, ground: !!src.ground, noDrone: !!src.noDrone }); };
   for (const o of SUP.orders) {
     if (o.producer === 'suit') { if (!o.missing || P.dead || !isLinked(P.x, P.y + 1)) continue; for (const k in o.missing) push(sourceOf(k, P.x, P.y, taken), { t: 'player' }, k, o.missing[k], 'player:' + k, 0); continue; }
     const m = o.machine; if (!m) continue; const [mx, my] = mpos(m), r = RECIPE[o.recipe];
     for (const k in r.in) { const want = Math.min(o.inputs[k], r.in[k] * (m.kind === 'furnace' ? 20 : 3)) - (m.inp[k] || 0); if (want > r.in[k] * 0.5) push(sourceOf(k, mx, my, taken), { t: 'mach', m, x: mx, y: my }, k, want, 'in:' + F.machines.indexOf(m) + ':' + k, 1); }
   }
   if (S.crash) {
+    // the hold is finite: nothing is carried to it that it has no room for (it would be set down at the hatch and
+    // carried again, for ever). What does not fit stays where it lies, and the HUD says the hold is full.
+    const room = {}, fits = (id, n) => { if (room[id] === undefined) room[id] = holdRoom(id); if (room[id] < Math.min(n, ITEMS[id].u === 'ea' ? 1 : 2)) return false; room[id] -= n; return true; }; SUP.full = false;
     for (const m of F.machines) if (m.kind === 'furnace' || m.kind === 'assembler' || m.kind === 'miner') for (const k in m.out) if (m.out[k] >= (ITEMS[k].u === 'ea' ? 1 : m.on ? 6 : 0.5)) { if (onBelt(m)) continue; const [mx, my] = mpos(m), sk = sinkFor(m, k), direct = sk && accepts(sk, k);      // straight to whoever consumes it, else to the hold; a finished belt needs no robot
+      if (!direct && !fits(k, m.out[k])) { SUP.full = true; continue; }
       if (isLinked(mx, my)) push({ t: 'out', m, x: mx, y: my, n: m.out[k] }, direct ? { t: 'mach', m: sk, x: mpos(sk)[0], y: mpos(sk)[1] } : { t: 'inv', inv: K.hold, x: SHIP.hatch[0], y: SHIP.hatch[1] + 0.8 }, k, m.out[k], 'out:' + F.machines.indexOf(m) + ':' + k, 2); }
     // loose matter: ore and organics to the hold; spoil to the hold while it wants some, then to the heap
     const spoilHave = {}; for (const k in SPOIL) spoilHave[k] = inv.count(K.hold, k);
     for (const c of matter.list) {
-      if (c.claim || c.dumped || c.temp > 0.7 || c.skip > G.time || taken.has(c) || jobs.length > 24 || !isLinked(c.x, c.y)) continue; const ground = !open(c); if (ground && !SUP.crawlers) { c.skip = G.time + 6; continue; } const key = 'loose:' + c.uid; if (has(key)) continue;
-      const spoil = c.id in SPOIL, toHold = !spoil || spoilHave[c.id] < SPOIL[c.id]; if (spoil && toHold) spoilHave[c.id] += c.n;
-      jobs.push({ kind: 'carry', src: { t: 'chunk', c, x: c.x, y: c.y + 0.5, n: c.n }, dst: toHold ? { t: 'inv', inv: K.hold, x: SHIP.hatch[0], y: SHIP.hatch[1] + 0.8 } : { t: 'dump', x: DUMP[0], y: DUMP[1] }, item: c.id, n: c.n, key, pri: spoil ? 4 : 3, x: c.x, y: c.y + 0.5, ground });
+      if (c.claim || c.dumped || c.temp > 0.7 || c.skip > G.time || taken.has(c) || jobs.length > 24 || !isLinked(c.x, c.y)) continue; const ground = !open(c), noDrone = c.noDrone > G.time; if (noDrone && !SUP.crawlers) continue; const key = 'loose:' + c.uid; if (has(key)) continue;
+      const spoil = c.id in SPOIL; let toHold = !spoil || spoilHave[c.id] < SPOIL[c.id]; if (toHold && !fits(c.id, c.n)) { SUP.full = true; if (!spoil) continue; toHold = false; } if (spoil && toHold) spoilHave[c.id] += c.n;
+      jobs.push({ kind: 'carry', src: { t: 'chunk', c, x: c.x, y: c.y + 0.5, n: c.n }, dst: toHold ? { t: 'inv', inv: K.hold, x: SHIP.hatch[0], y: SHIP.hatch[1] + 0.8 } : { t: 'dump', x: DUMP[0], y: DUMP[1] }, item: c.id, n: c.n, key, pri: spoil ? 4 : 3, x: c.x, y: c.y + 0.5, ground, noDrone });
     }
   }
   return jobs.sort((a, b) => a.pri - b.pri);
@@ -104,7 +112,7 @@ export function stepSupply(dt) {
       // what an earlier order still waits for is kept for it: a later, cheaper order does not eat the iron first
       const lack = Object.keys(r.in).filter(k => inv.count(K.hold, k) < r.in[k] - 1e-9), kept = Object.keys(r.in).filter(k => held[k] && inv.count(K.hold, k) - held[k] < r.in[k] - 1e-9);
       if (!lack.length && !kept.length && inv.pay(K.hold, r.in)) { K.fab = { r: r.id, left: r.t * FAB.slow, total: r.t * FAB.slow }; o.note = `ship fabricator: ${Math.ceil(K.fab.left)} s`; events.emit('aiQueued', o.item); }
-      else if (lack.length && !P.dead && isLinked(P.x, P.y + 1) && S.has(r.in) && S.printer.q.filter(j => j.r === o.recipe).length < Math.min(o.batches, 2) && S.printer.q.length < 6 && printerQueue(S.printer, S.inv, o.recipe, 1)) { o.note = 'queued on the arm: the suit holds the ' + Object.keys(r.in).join(', '); events.emit('aiQueued', o.item); }      // every means: the hold has none, the suit does
+      else if (o.why === 'build' && lack.length && !P.dead && isLinked(P.x, P.y + 1) && S.has(r.in) && S.printer.q.filter(j => j.r === o.recipe).length < Math.min(o.batches, 2) && S.printer.q.length < 6 && printerQueue(S.printer, S.inv, o.recipe, 1)) { o.note = 'queued on the arm: the suit holds the ' + Object.keys(r.in).join(', '); events.emit('aiQueued', o.item); }      // every means: the hold has none, the suit does
       else { for (const k in r.in) held[k] = (held[k] || 0) + r.in[k]; o.note = lack.length ? 'ship fabricator waits for ' + lack.join(', ') + ' in the hold' : 'waits: the ' + kept.join(', ') + ' in the hold is kept for an earlier order'; }
       continue;
     }

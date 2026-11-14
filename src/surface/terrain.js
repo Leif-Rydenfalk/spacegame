@@ -125,7 +125,8 @@ void main(){
   // ground mist in the play plane: it pools low, drifts with the wind and takes the colour of whatever lights it
   { float ms=fb(vec2(w.x*.07-uTime*.035,w.y*.2+uTime*.008)), lo=exp(-max(0.,w.y-uHorizon+.5)*.3)*(1.-wall*.6);
     ae += (Lf*.5+uFog*.35)*ms*ms*lo*.3*smoothstep(.0,-.4,sd); }
-  vec3 col = mix(mix(skyc, aa2*L, wall) + ae, ra*Ls + re, solid);
+  // the back wall is never black: what was cut open shows dark rock behind it even where no lamp reaches
+  vec3 col = mix(mix(skyc, aa2*(L+vec3(.16,.18,.22)), wall) + ae, ra*Ls + re, solid);
   if(det<1.) col = mix(farCol(w,vV,sk), col, det);
   gl_FragColor = vec4(max(col,0.), 1.);
 }`;
