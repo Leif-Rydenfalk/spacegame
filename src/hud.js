@@ -11,10 +11,13 @@ export const fmt = {
   v(v) { return Math.abs(v) >= 1e4 ? (v / 1e3).toFixed(2) + ' km/s' : v.toFixed(1) + ' m/s'; },
   t(s) { s = Math.max(0, s); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60), ss = Math.floor(s % 60); return (d ? d + 'd ' : '') + String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(ss).padStart(2, '0'); },
 };
-// story beats: one quiet line at the bottom for 6 s, kept in a log (L)
+// story beats: one quiet line at the bottom for 6 s, kept in a log (L). What has been seen is saved.
 const seen = new Set(); export const beats = { cur: null, t: 0, log: [] };
 events.on('*', n => { for (const b of STORY.beats) if (b.trigger === n && !(b.once && seen.has(b.id))) { seen.add(b.id); beats.cur = b; beats.t = 6; beats.log.push(b.text); } });
+// lore read in the world (ruin stones, terminals, audio logs): entry n of STORY.lore[kind][key], wrapping
+export function lore(kind, key, n) { const list = STORY.lore[kind] && STORY.lore[kind][key]; if (!list || !list.length) return; const e = list[n % list.length]; seen.add(e.id); beats.cur = e; beats.t = 9; beats.log.push(e.text); }
+export const seenDump = () => [...seen].sort(), seenLoad = a => { seen.clear(); for (const k of a || []) seen.add(k); beats.cur = null; beats.log.length = 0; };
 export function drawBeats(c, dt, showLog) {
-  if (beats.cur && beats.t > 0) { beats.t -= dt; txt(c, beats.cur.text, G.w / 2, G.h - 54, { align: 'center', size: 11, a: 0.75 * Math.min(1, beats.t, 6 - beats.t + 0.2) }); }
+  if (beats.cur && beats.t > 0) { beats.t -= dt; txt(c, beats.cur.text, G.w / 2, G.h - 122, { align: 'center', size: 11, a: 0.75 * Math.min(1, beats.t, 6 - beats.t + 0.2 > 0 ? 1 : 0) }); }
   if (showLog) beats.log.slice(-12).forEach((l, i) => txt(c, l, G.w / 2, 120 + i * 18, { align: 'center', a: 0.7 }));
 }

@@ -3,6 +3,8 @@ import { G, input, events, clamp, rand, TAU, angDiff } from '../core.js';
 import { R, Batch } from '../render.js';
 import { audio } from '../audio.js';
 import { txt, line, bar, bracket, fmt, AMBER, RED, INK } from '../hud.js';
+import { drawIcon } from '../icons.js';
+import { save } from '../save.js';
 import { bodies, bodyState, patch, elFromState, stateAtNu, trueAnomaly, apo, peri, period, timeToNu, HOME, STAR, GIANT, ATMO, G0 } from './orbit.js';
 import { Sp, K, mul } from './state.js';
 import { PARTS, BUILDABLE, BP, CELL, makeShip, recalc, stepShip, railShip, drawShip, islands, partAt, partWorld } from './ship.js';
@@ -56,7 +58,7 @@ function hangarInput() {
 }
 export { Sp };
 export const space = {
-  init() { initView(R.scenes.space); belt.scene = R.scenes.space; Sp.batch = new Batch(R.scenes.space, 20000, 10); },
+  init() { initView(R.scenes.space); belt.scene = R.scenes.space; Sp.batch = new Batch(R.scenes.space, 20000, 10); save.register('space', { dump: dumpSpace, load: loadSpace }); },
   start(scn, data) {
     Sp.auto = G.auto;
     if (data && data.launch) setupLaunch(false); else if (scn === 'launch') setupLaunch(true); else if (scn === 'mining' || scn === 'combat') setupBelt(scn); else { setupOrbit(); if (scn === 'builder') Sp.hangar = true; }
@@ -182,7 +184,7 @@ export const space = {
 function hangarHud(c) {
   const me = Sp.me, w = G.w, h = G.h, k = 1 / 0.03, cs = CELL * k, X = lx => w / 2 + (lx - me.com[0]) * k, Y = ly => h / 2 - (ly - me.com[1]) * k;
   txt(c, 'hangar', 28, 78, { size: 12, a: 0.8 }); txt(c, 'lmb place   rmb remove   b close', 28, 96, { a: 0.4 });
-  BUILDABLE.forEach((t, i) => txt(c, `${t === sel ? '> ' : '  '}${PARTS[t].label}  ${PARTS[t].m + (PARTS[t].fuel || 0)} t`, 28, 142 + i * 22, t === sel ? { col: AMBER, a: 0.95 } : { a: 0.55 }));
+  BUILDABLE.forEach((t, i) => { drawIcon(c, 'ship:' + t, 26, 128 + i * 22, 20); if (t === sel) { c.strokeStyle = `rgba(${AMBER},0.9)`; c.lineWidth = 1; c.strokeRect(25.5, 127.5 + i * 22, 21, 21); } txt(c, `${PARTS[t].label}  ${PARTS[t].m + (PARTS[t].fuel || 0)} t`, 56, 142 + i * 22, t === sel ? { col: AMBER, a: 0.95 } : { a: 0.55 }); });
   for (let i = -7; i <= 6; i++) { line(c, X((i + 0.5) * CELL), Y(-6.5 * CELL), X((i + 0.5) * CELL), Y(6.5 * CELL), 0.07); line(c, X(-6.5 * CELL), Y((i + 0.5) * CELL), X(6.5 * CELL), Y((i + 0.5) * CELL), 0.07); }
   const gx = Math.round(((input.mx - w / 2) / k + me.com[0]) / CELL), gy = Math.round((-(input.my - h / 2) / k + me.com[1]) / CELL); if (input.mx > 300) { c.strokeStyle = `rgba(${AMBER},0.6)`; c.strokeRect(Math.round(X(gx * CELL) - cs / 2) + 0.5, Math.round(Y(gy * CELL) - cs / 2) + 0.5, cs, cs); }
   // centre of mass, thrust lines and what they do to the ship
@@ -194,4 +196,33 @@ function hangarHud(c) {
     ['main thrust', (me.thrust / 1000).toFixed(0) + ' kN'], ['acceleration', (me.thrust / me.m).toFixed(2) + ' m/s2'], ['engine imbalance', (me.imb / 1000).toFixed(1) + ' kNm' + (bal ? '  spins under thrust' : '')], ['spin-up at full thrust', (me.imb / me.I * 57.3).toFixed(2) + ' deg/s2'],
     ['delta-v', fmt.v(me.dv) + '  = Isp g0 ln(m0/m1)'], ['isp', me.isp.toFixed(0) + ' s'], ['burn time', me.mdot ? (me.fuel * 1000 / me.mdot).toFixed(0) + ' s' : '-'], ['rcs torque', (rcsT / 1000).toFixed(1) + ' kNm'], ['wheel torque', (me.wheel / 1000).toFixed(0) + ' kNm'], ['cargo', me.cargoCap + ' ore']];
   rows.forEach(([a, v], i) => { txt(c, a, w - 470, 142 + i * 20, { a: 0.4 }); txt(c, v, w - 290, 142 + i * 20, { a: 0.75, col: i === 6 && bal ? AMBER : INK }); });
+}
+
+// ---- save: ships with their parts, orbits as elements at an epoch (and the exact state vector), the depot, mining
+// platforms, drones and every asteroid someone has cut. Everything not listed is regenerated from the seed.
+function dumpSpace() {
+  const me = Sp.me; if (!me || me.dead || !me.m) return null;
+  const pfs = [], asts = [];
+  for (const [k, sec] of belt.loaded) if (sec.mod) asts.push([k, sec.asts.map(a => { if (a.platform) pfs.push(a.platform); return { r: Array.from(a.r, v => +v.toFixed(3)), R: a.R, mined: +a.mined.toFixed(3), pf: a.platform ? [a.platform.j, +a.platform.ore.toFixed(3)] : null }; })]);
+  const live = Sp.ships.filter(q => q.m && !q.dead);
+  const ships = live.map(q => ({ id: q.id, owner: q.owner, name: q.name, parts: q.parts.map(p => [p.type, p.gx, p.gy, +p.hp.toFixed(2), +p.fuel.toFixed(6)]), body: q.body, p: q.p.slice(), v: q.v.slice(), el: q.landed ? null : elFromState(q.p[0], q.p[1], q.v[0], q.v[1], bodies[q.body].mu, Sp.t), epoch: Sp.t,
+    ang: q.ang, angVel: q.angVel, throttle: q.throttle, sas: q.sas, hold: q.hold, landed: !!q.landed, station: !!q.station, org: !!q.org, debris: !!q.debris, ore: q.ore, metal: q.metal, amax: q.amax, orbitSaid: !!q.orbitSaid, coast: !!q.coast,
+    drone: q.drone ? { state: q.drone.state, t: q.drone.t, load: q.drone.load, pf: pfs.indexOf(q.drone.pf) } : null, platform: q.platform ? pfs.indexOf(q.platform) : -1 }));
+  return { t: Sp.t, ships, me: live.indexOf(me), depot: live.indexOf(Sp.depot), scale: Sp.cam.scale, warpI, lock, launched, foot, asts };
+}
+function loadSpace(o) {
+  for (const sec of belt.loaded.values()) for (const a of sec.asts) if (a.mesh) { belt.scene.remove(a.mesh); a.mesh.geometry.dispose(); a.mesh.material.dispose(); }
+  belt.loaded.clear(); Sp.ships.length = 0; Sp.shells.length = 0; Sp.chunks.length = 0; Sp.asteroids.length = 0; Sp.parts.list.length = 0; Sp.me = Sp.depot = Sp.target = null; Sp.hangar = false; Sp.pilot = null;
+  if (!o) return;
+  Sp.t = o.t; const pfs = [];
+  for (const [k, list] of o.asts) { const [ring, slot] = k.split(':').map(Number), asts = genSector(ring, slot); list.forEach((q, i) => { const a = asts[i]; a.r.set(q.r); a.R = q.R; a.mined = q.mined; a.dirty = true; if (q.pf) { a.platform = { a, j: q.pf[0], ore: q.pf[1], x: 0, y: 0, ang: 0 }; pfs.push(a.platform); } }); belt.loaded.set(k, { asts, mod: true }); }
+  for (const q of o.ships) {
+    const s = makeShip(q.parts.map(p => [p[0], p[1], p[2]]), { id: q.id, owner: q.owner, name: q.name, body: q.body, sas: q.sas, hold: q.hold, landed: q.landed, ore: q.ore, ang: q.ang, angVel: q.angVel, throttle: q.throttle });
+    q.parts.forEach((p, i) => { s.parts[i].hp = p[3]; s.parts[i].fuel = p[4]; }); s.com = null; recalc(s); s.p = q.p.slice(); s.v = q.v.slice();
+    if (q.station) s.station = true; if (q.org) s.org = true; if (q.debris) s.debris = true; if (q.metal !== undefined) s.metal = q.metal; if (q.amax !== undefined) s.amax = q.amax; if (q.orbitSaid) s.orbitSaid = true; if (q.coast) s.coast = true;
+    if (q.drone) s.drone = { state: q.drone.state, t: q.drone.t, load: q.drone.load, pf: pfs[q.drone.pf] }; if (q.platform >= 0) s.platform = pfs[q.platform];
+    Sp.ships.push(s);
+  }
+  Sp.me = Sp.ships[o.me] || null; Sp.depot = Sp.ships[o.depot] || null; Sp.cam.scale = o.scale; warpI = o.warpI; lock = o.lock; launched = o.launched; foot = o.foot; autoZoom = false; deadT = 0;
+  if (Sp.me && Sp.me.body === STAR) updateBelt(Sp.me.p[0], Sp.me.p[1], Sp.t);
 }

@@ -1,0 +1,52 @@
+// save and load. One module, one adapter interface: { load(slot), save(slot, blob), list() }, all returning promises.
+// The default adapter is IndexedDB with a localStorage fallback (and a synchronous localStorage copy when the page is
+// being hidden, because an IndexedDB write may not finish then). A ce-net state.store adapter tied to the player's
+// identity can replace it later with save.use(adapter): nothing else in the game touches storage.
+// A blob is { version, rev, savedAt, hash, data }. data = { seed, act, time, playerId, parts: { name: dump } }.
+import { G } from './core.js';
+export const VERSION = 2;
+// version n -> n + 1. Version 1 was demo 1, which had no saves; the hook is here for the next change of schema.
+const MIGRATE = { 1: b => { b.version = 2; return b; } };
+const parts = {};
+export function fnv(str) { let h = 0x811c9dc5; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(16).padStart(8, '0'); }
+
+function idb() { return new Promise((res, rej) => { const r = indexedDB.open('spacegame', 1); r.onupgradeneeded = () => r.result.createObjectStore('saves'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+const tx = (mode, f) => idb().then(db => new Promise((res, rej) => { const q = f(db.transaction('saves', mode).objectStore('saves')); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }));
+export const idbAdapter = { load: slot => tx('readonly', s => s.get(slot)).then(v => v || null), save: (slot, blob) => tx('readwrite', s => s.put(blob, slot)), list: () => tx('readonly', s => s.getAllKeys()) };
+const LK = 'spacegame:';
+export const lsAdapter = {
+  async load(slot) { const s = localStorage.getItem(LK + slot); return s ? JSON.parse(s) : null; },
+  async save(slot, blob) { localStorage.setItem(LK + slot, JSON.stringify(blob)); },
+  async list() { return Object.keys(localStorage).filter(k => k.startsWith(LK)).map(k => k.slice(LK.length)); },
+};
+export const memAdapter = () => { const m = new Map(); return { async load(s) { return m.has(s) ? JSON.parse(m.get(s)) : null; }, async save(s, b) { m.set(s, JSON.stringify(b)); }, async list() { return [...m.keys()]; } }; };
+// IndexedDB first, localStorage when it is missing or refuses; on load the newer of the two wins
+export const localAdapter = {
+  async load(slot) { let a = null, b = null; try { a = await idbAdapter.load(slot); } catch (e) { /* no IndexedDB */ } try { b = await lsAdapter.load(slot); } catch (e) { /* no localStorage */ } return !a ? b : !b ? a : (b.rev || 0) > (a.rev || 0) ? b : a; },
+  async save(slot, blob) { try { await idbAdapter.save(slot, blob); try { localStorage.removeItem(LK + slot); } catch (e) { /* ignore */ } } catch (e) { await lsAdapter.save(slot, blob); } },
+  async list() { const out = new Set(); try { for (const k of await idbAdapter.list()) out.add(k); } catch (e) { /* ignore */ } try { for (const k of await lsAdapter.list()) out.add(k); } catch (e) { /* ignore */ } return [...out]; },
+};
+export const save = {
+  adapter: localAdapter, slot: null, rev: 0, last: 0, chain: null, status: '',
+  use(a) { this.adapter = a; },
+  // a game unit registers { dump(), load(o) }; load order is registration order
+  register(name, unit) { parts[name] = unit; },
+  collect() { const data = { seed: G.seed, act: G.act, time: +G.time.toFixed(3), playerId: G.playerId, parts: {} }; for (const k in parts) data.parts[k] = parts[k].dump(); return data; },
+  hash(data) { return fnv(JSON.stringify(data)); },
+  blob() { const data = this.collect(); return { version: VERSION, rev: ++this.rev, savedAt: Date.now(), hash: this.hash(data), data }; },
+  migrate(b) { while (b.version < VERSION) { const f = MIGRATE[b.version]; if (!f) throw new Error('no migration from save version ' + b.version); b = f(b); } if (b.version > VERSION) throw new Error('save is from a newer version'); return b; },
+  // put a blob's data into the running game
+  apply(b) { b = this.migrate(b); const d = b.data; G.seed = d.seed; G.time = d.time; G.playerId = d.playerId || G.playerId; this.rev = b.rev || 0; for (const k in parts) if (d.parts[k] !== undefined) parts[k].load(d.parts[k]); return d; },
+  // writes are queued, so two callers never interleave and each gets the blob it wrote
+  write(slot = this.slot) {
+    if (!slot) return Promise.resolve(null);
+    const run = async () => { try { const b = this.blob(); await this.adapter.save(slot, b); this.last = performance.now(); this.status = 'saved'; return b; } catch (e) { this.status = 'save failed: ' + e.message; console.warn(this.status); return null; } };
+    return (this.chain = (this.chain || Promise.resolve()).then(run));
+  },
+  // the page is going away: one synchronous copy to localStorage, then the normal write
+  flush() { if (!this.slot) return; try { const b = this.blob(); try { localStorage.setItem(LK + this.slot, JSON.stringify(b)); } catch (e) { /* too large for localStorage: IndexedDB below still tries */ } this.adapter.save(this.slot, b).catch(() => {}); } catch (e) { console.warn('flush failed', e); } },
+  async read(slot) { try { const b = await this.adapter.load(slot); return b ? this.migrate(b) : null; } catch (e) { console.warn('load failed', e); return null; } },
+  tick(now) { if (this.slot && now - this.last > 30000) { this.last = now; this.write(); } },
+  exportFile() { const b = this.blob(), a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(b)], { type: 'application/json' })); a.download = `spacegame-save-${new Date(b.savedAt).toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); },
+  async importFile(file, slot = 'main') { const b = this.migrate(JSON.parse(await file.text())); if (!b.data || !b.data.parts) throw new Error('not a spacegame save'); b.rev = Date.now(); await this.adapter.save(slot, b); return b; },
+};

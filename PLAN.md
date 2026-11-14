@@ -480,3 +480,28 @@ What this changes:
 - C2: **setting**: a neighbouring star system where Earth sends prisoners to do research on its planets; that is where it went wrong. Real-scale distances, names stay placeholders in `story.js` for Leif's story.
 - C4: demo 1 is one page; the five-cell split is demo 2 (default kept).
 - Models: Fable 5.2 plans, integrates and judges.
+
+
+## Lore notes (Leif, 2026-11-14)
+
+Leif's words on demo 1, verbatim and in order. They are the brief for round 2 and the canon the story is written from;
+his own story text replaces the `[placeholder]` slots in `src/story.js`.
+
+"good first prototpye. i don l like the grid system. we need a dynamic voxel like system which allows very granular terrain changes and smooth exclusii want a blueprint mode, robots which builds things for me and a combat mode. and icons for everything properly and a inventory i can open up witn a proper square inventory bar with items in my inventory."
+
+"and progress must be saved across session resets"
+
+"and we need a lot more trees and more lush forests and organics. adn teh item system cannot be integres it must be floats and comumabmles must be properly coiunted and bullets and everything. and our own suit should have its own printer which allows printing basically anything lik e a  atmom printer but its very slow which is why we build machines which are bad at genralizing but very good at specilizing quicjkly and we neda lot more co" (the message was cut off there)
+
+"we need a lot more lush procedural forest, the laser drill must be more powerful and strong and we nee alien ruins and a system to procedurally genrate alien ruins. aliens live in hives underground and come out when they sense more and more polution and noise and are atracted to noise. there are many speciies on the starting planet. thereare human militar ybases and facilities which are under lockdown because the hivemind recently made attacks and shut more and more down. this is very lore based"
+
+What the lore says, as built in round 2 (each point has a slot or a system, none has story text yet):
+
+- The starting planet has **many species**; they **live in hives underground**. Built: six hive species with roles (scout, swarmer, brute, spitter, burrower, flier) and two harmless natives, `src/surface/creatures.js`; hives as generated chambers, tunnels, egg sacs and a heart, `src/surface/hive-gen.js`. Names: `STORY.species`.
+- They **come out when they sense more and more pollution and noise, and are attracted to noise**. Built: `src/surface/env.js` (noise events in metres of audible radius, pollution in 8 m cells that spreads and decays) and `src/surface/hive.js` (alert per hive, waves that grow with it, creatures path to the loudest source).
+- There is a **hivemind**; it **recently attacked** and is **shutting more and more facilities down**. Built: `hive.spread`, a saved world value that rises with time and pollution; each facility has a threshold and goes dark when it is passed (`facilityDark`).
+- There are **human military bases and facilities under lockdown** (it is a prison research colony). Built: `src/surface/base-gen.js`: outposts and research stations with blast doors, emergency lights, dead sentries and turrets, a breached wall with hive growth, terminals, audio-log slots, supply caches.
+- There are **alien ruins**, made by a **procedural system**. Built: `src/surface/ruins-gen.js`, a seeded grammar with five style rules; lore stones and vault caskets carry the story hooks (`STORY.lore.ruin`).
+- **The suit prints anything, slowly; machines specialise and are fast.** Built: `src/items.js` (`SUIT_SLOW`, `printerQueue`), the suit printer panel beside the inventory.
+
+Open for Leif (defaults are in the code): who built the ruins and how they relate to the hives; what the prisoners were sent to study; why the hivemind attacked now; the names of the species, the sites and the planet.

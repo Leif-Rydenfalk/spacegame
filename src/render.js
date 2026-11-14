@@ -26,7 +26,7 @@ const FinalShader = {
       col *= 1.0 - 0.38*smoothstep(0.3,0.95,length(c*vec2(1.0,0.82))*1.35);
       float g = h(gl_FragCoord.xy*0.5+fract(uTime*7.13)*97.0)-.5;
       col += g*0.045*(1.0-0.5*dot(col,vec3(.33)));
-      col = mix(col, vec3(1.0,0.12,0.1), uFlash*r2*1.6);  // damage pulse lives at the edges only
+      col = mix(col, vec3(1.0,0.12,0.1), min(1.0,uFlash)*smoothstep(0.08,0.5,r2)*0.75);  // damage pulse lives at the edges only
       gl_FragColor = vec4(col,1.0);
     }`,
 };
@@ -60,7 +60,7 @@ export function renderFrame(flash) {
 }
 
 // ---- instanced sprite batch -------------------------------------------------------------------------------------
-// shapes: 0 grained rect, 1 soft glow, 2 capsule, 3 sunlit hull plate, 4 ring, 5 sunlit ball, 6 engine plume
+// shapes: 0 grained rect, 1 soft glow, 2 capsule, 3 sunlit hull plate, 4 ring, 5 sunlit ball, 6 engine plume, 7 foliage mass, 8 dome (half disc)
 // modes:  0 unlit, 1 lit by the surface light map, 2 additive emissive
 const BV = `
 attribute vec4 iA, iB, iC; varying vec2 vL, vS, vW; varying vec4 vC; varying vec4 vP;
@@ -86,8 +86,11 @@ void main(){
   else if(shape<4.5){ float d=length(vL)*2.0; a=smoothstep(0.08,0.0,abs(d-0.9))*0.9; }
   else if(shape<5.5){ float d=length(vL)*2.0; a=smoothstep(1.0,0.92,d); vec3 n=vec3(vL*2.0,sqrt(max(0.0,1.0-d*d)));
     col*=gr*mix(0.03,1.0,smoothstep(-0.25,0.45,dot(n.xy,sl)+n.z*0.15)); }
-  else { float x=vL.x+0.5; float wd=0.22+x*0.78; float y=vL.y*2.0/wd; a=exp(-y*y*3.0)*pow(1.0-x,1.6)*smoothstep(0.0,0.06,x)/wd*0.5;
+  else if(shape<6.5){ float x=vL.x+0.5; float wd=0.22+x*0.78; float y=vL.y*2.0/wd; a=exp(-y*y*3.0)*pow(1.0-x,1.6)*smoothstep(0.0,0.06,x)/wd*0.5;
     a*=0.75+0.5*h(floor(q/2.0)+vP.w*37.0); }
+  else if(shape<7.5){ float d=length(vL)*2.0; float nz=h(floor(q/3.0)+vP.w*13.0)*.6+h(floor(q/7.0)+vP.w*5.0)*.4; a=smoothstep(1.0,0.74,d+(nz-.5)*.5);
+    col*=gr*(0.5+0.5*smoothstep(-0.7,0.5,vL.y*2.0))*(0.75+0.5*nz); }
+  else { float d=length(vL)*2.0; a=smoothstep(1.0,0.86,d)*step(0.0,vL.y+0.02); col*=gr*(0.45+0.55*smoothstep(0.0,0.5,vL.y)); }
   if(mode>0.5&&mode<1.5){ vec3 L=texture2D(uLight,(vW-uLR.xy)*uLR.zw).rgb; col*=L*L*4.0; }
   a*=vC.a;
   gl_FragColor = mode>1.5 ? vec4(col*a,0.0) : vec4(col*a,a);

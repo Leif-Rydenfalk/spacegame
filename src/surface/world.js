@@ -1,80 +1,139 @@
-// surface world: tiles in 32x32 chunks, generated on demand as a pure function of (x, y, seed).
-import { hash, noise2, fbm } from '../core.js';
-export const TS = 0.5;                       // metres per tile
-export const GRAV = 8.7;                     // m/s^2, stated in the HUD
-export const T = { AIR: 0, SOIL: 2, BASALT: 3, OBSIDIAN: 4, IRON: 5, COPPER: 6, LUMEN: 7, LAVA: 8, MOSS: 9, FUNGUS: 10, POD: 11, VINE: 12, PLATE: 13 };
-export const WALL = 32;                      // bit: a back wall behind this tile (underground)
-export const isSolid = id => { const k = id & 31; return (k >= 2 && k <= 7) || k === 9 || k === 13; };
-export const HARD = { 2: 0.35, 3: 0.9, 4: 1.6, 5: 1.1, 6: 1.2, 7: 1.4, 9: 0.35, 10: 0.1, 11: 0.1, 12: 0.1, 13: 1.0 };
-export const DROP = { 2: 'soil', 3: 'basalt', 4: 'basalt', 5: 'iron ore', 6: 'copper ore', 7: 'lumen', 9: 'soil', 10: 'lumen', 11: 'lumen', 13: 'plate' };
-const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+// surface world: a fine dynamic density field (0.125 m samples, 64x64 chunks, one density byte and one material byte
+// per sample), generated on demand as a pure function of (x, y, seed) and then edited with smooth brushes.
+// density byte 128 is the surface; one metre of signed distance is 254 steps, saturating at +-0.5 m.
+import { noise2, clamp } from '../core.js';
+import { CELL, CH, TS, GRAV, SLAB, WALL, M, MAT, surfaceH, natD, oreIron, oreCopper, oreLumen, stampSD, stampBox } from './gen.js';
+import { structsIn } from './structures.js';
+export { CELL, CH, TS, GRAV, SLAB, WALL, M, MAT, surfaceH };
+const N = CH * CH, LN = CH / 2 + 1, KG = CELL * CELL * SLAB;      // KG * rho = kg in one full sample
+const chunks = new Map(); let lastKey = NaN, last = null;
+const Ld = new Float32Array(LN * LN), Li = new Float32Array(LN * LN), Lc = new Float32Array(LN * LN), Ll = new Float32Array(LN * LN), Lh = new Float32Array(LN), F = new Float32Array(N);
+const ckey = (cx, cy) => (cx + 32768) * 65536 + (cy + 32768);
+export const cov = b => b <= 112 ? 0 : b >= 144 ? 1 : (b - 112) / 32;      // antialiased coverage of one sample
 
-export function surfaceH(x) {
-  const h = (fbm(x / 90, 0, 1, 4) - 0.5) * 44 + (noise2(x / 13, 3, 2) - 0.5) * 5;
-  return Math.floor(h * smooth(26, 80, Math.abs(x)));   // the crash site is flat
-}
-export function solidGen(x, y) {
-  const h = surfaceH(x); if (y > h) return false;
-  const depth = h - y, open = Math.abs(x) > 30 && noise2(x / 46, 0, 33) > 0.62 ? 0 : 5;
-  if (depth >= open) {
-    const n = fbm(x / 38, y / 24, 5, 3);
-    if (Math.abs(n - 0.5) < 0.03 + Math.min(depth, 60) * 0.0005) return false;
-    if (depth > 8 && fbm(x / 24, y / 17, 9, 3) > 0.66) return false;
-  }
-  return true;
-}
-function gen(x, y) {
-  const h = surfaceH(x), wall = y <= h ? WALL : 0;
-  if (solidGen(x, y)) {
-    const depth = h - y;
-    let m = depth < 4 + hash(x, 0, 3) * 3 ? T.SOIL : y > -90 + noise2(x / 30, 0, 4) * 14 ? T.BASALT : T.OBSIDIAN;
-    if (m !== T.SOIL) {
-      if (depth < 80 && fbm(x / 8, y / 8, 21, 2) > 0.7) m = T.IRON;
-      else if (depth > 12 && fbm(x / 8, y / 8, 22, 2) > 0.72) m = T.COPPER;
-      else if (depth > 7 && fbm(x / 6, y / 6, 23, 2) > 0.73) m = T.LUMEN;
+function genChunk(cx, cy) {
+  const d = new Uint8Array(N), m = new Uint8Array(N), X0 = cx * CH * CELL, Y0 = cy * CH * CELL, W = CH * CELL;
+  let hmax = -1e9; for (let i = 0; i < LN; i++) { const h = Lh[i] = surfaceH(X0 + i * 0.25); if (h > hmax) hmax = h; }
+  const sts = structsIn(X0 - 1, X0 + W + 1).filter(s => s.y1 > Y0 - 1 && s.y0 < Y0 + W + 1);
+  if (Y0 > hmax + 1.5 && !sts.length) return { d, m, mod: false };
+  if (Y0 > hmax + 1.5) F.fill(-1);
+  else {
+    for (let j = 0, o = 0; j < LN; j++) for (let i = 0; i < LN; i++, o++) {
+      const x = X0 + i * 0.25, y = Y0 + j * 0.25, v = Ld[o] = natD(x, y, Lh[i]);
+      if (v > -0.7) { Li[o] = oreIron(x, y); Lc[o] = oreCopper(x, y); Ll[o] = oreLumen(x, y); } else Li[o] = Lc[o] = Ll[o] = 0;
     }
-    if ((m === T.SOIL || m === T.BASALT) && !solidGen(x, y + 1) && hash(x, y, 30) < (depth < 1 ? 0.3 : 0.45)) m = T.MOSS;
-    return m | wall;
+    for (let i = 0; i < CH; i++) {
+      const x = X0 + i * CELL, li = i >> 1, fx = (i & 1) * 0.5, h = Lh[li] + (Lh[li + 1] - Lh[li]) * fx, soil = 1.6 + noise2(x / 2.5, 0, 3) * 1.6, obs = -45 + noise2(x / 15, 0, 4) * 7;
+      for (let j = 0; j < CH; j++) {
+        const y = Y0 + j * CELL, lj = j >> 1, fy = (j & 1) * 0.5, o = lj * LN + li, q = j * CH + i, depth = h - y;
+        const bl = (A) => { const a = A[o], b = A[o + 1], c = A[o + LN], e = A[o + LN + 1]; return a + (b - a) * fx + (c - a) * fy + (a - b - c + e) * fx * fy; };
+        let v = bl(Ld);
+        if (v > -0.7) {
+          if (v < 0.5 && v > -0.5) v += (noise2(x * 3.1, y * 3.1, 77) - 0.5) * 0.11 * Math.min(1, Math.abs(x) / 6 + (depth > 1 ? 1 : 0));
+          let k = M.BASALT;
+          if (depth < soil) k = M.SOIL; else if (depth < 40 && bl(Li) > 0.7) k = M.IRON; else if (depth > 6 && bl(Lc) > 0.72) k = M.COPPER; else if (depth > 3.5 && bl(Ll) > 0.73) k = M.LUMEN; else if (y < obs) k = M.OBSIDIAN;
+          m[q] = k | (depth > 0.9 ? WALL : 0);
+        }
+        F[q] = v;
+      }
+    }
   }
-  if (y < -120) return T.LAVA | wall;
-  const cl = noise2(x / 12, y / 12, 41);
-  if (solidGen(x, y - 1)) {
-    const r = hash(x, y, 40);
-    if (cl > 0.5 && r < 0.42) return T.FUNGUS | wall;
-    if (r > 0.975) return T.POD | wall;
+  for (const st of sts) for (const s of st.stamps) {
+    const b = s.bb || (s.bb = stampBox(s)), i0 = Math.max(0, Math.floor((b[0] - 0.6 - X0) / CELL)), i1 = Math.min(CH - 1, Math.ceil((b[2] + 0.6 - X0) / CELL)), j0 = Math.max(0, Math.floor((b[1] - 0.6 - Y0) / CELL)), j1 = Math.min(CH - 1, Math.ceil((b[3] + 0.6 - Y0) / CELL));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      const q = j * CH + i, sd = stampSD(s, X0 + i * CELL, Y0 + j * CELL);
+      if (s.op > 0) { if (-sd > F[q]) F[q] = -sd; if (sd < 0.3) m[q] = s.mat | (s.wall ? WALL : m[q] & WALL); }
+      else { if (sd < F[q]) F[q] = sd; if (sd < 0.06) m[q] = (s.mat || (m[q] & 127) || M.BASALT) | (s.wall === undefined ? m[q] & WALL : s.wall ? WALL : 0); }
+    }
   }
-  if (y <= h && hash(x, 0, 42) < 0.3 && cl < 0.55) { // vines hang one to three tiles under a ceiling
-    const len = 1 + Math.floor(hash(x, 1, 43) * 3);
-    for (let i = 1; i <= len; i++) { if (solidGen(x, y + i)) return T.VINE | wall; if (solidGen(x, y + i - 1)) break; }
-  }
-  return wall;
+  for (let q = 0; q < N; q++) d[q] = clamp(Math.round(128 + F[q] * 254), 0, 255);
+  return { d, m, mod: false };
 }
-
-const CH = 32, chunks = new Map(); let lastKey = NaN, last = null;
 function chunk(cx, cy) {
-  const key = (cx + 32768) * 65536 + (cy + 32768);
-  if (key === lastKey) return last;
+  const key = ckey(cx, cy); if (key === lastKey) return last;
   let c = chunks.get(key);
   if (!c) {
-    c = { d: new Uint8Array(CH * CH), mod: false, used: 0 };
-    for (let j = 0; j < CH; j++) for (let i = 0; i < CH; i++) c.d[j * CH + i] = gen(cx * CH + i, cy * CH + j);
-    chunks.set(key, c);
-    if (chunks.size > 400) for (const [k, v] of chunks) { if (!v.mod && v !== c) { chunks.delete(k); if (chunks.size <= 320) break; } }
+    c = genChunk(cx, cy); chunks.set(key, c);
+    if (chunks.size > 700) for (const [k, v] of chunks) { if (!v.mod && v !== c) { chunks.delete(k); if (chunks.size <= 520) break; } }
   }
   lastKey = key; last = c; return c;
 }
+const gd = (ix, iy) => chunk(ix >> 6, iy >> 6).d[((iy & 63) << 6) | (ix & 63)];
+const gm = (ix, iy) => chunk(ix >> 6, iy >> 6).m[((iy & 63) << 6) | (ix & 63)];
+const circle = (cx, cy, r) => (x, y) => Math.hypot(x - cx, y - cy) - r;
+const NO = {};
+
 export const world = {
-  chunks,
-  get(x, y) { return chunk(x >> 5, y >> 5).d[((y & 31) << 5) | (x & 31)]; },
-  set(x, y, id) { const c = chunk(x >> 5, y >> 5); c.d[((y & 31) << 5) | (x & 31)] = id; c.mod = true; },
-  solid(x, y) { return isSolid(this.get(x, y)); },
-  solidAt(mx, my) { return isSolid(this.get(Math.floor(mx / TS), Math.floor(my / TS))); },   // metres
-  // first solid tile straight down from (tx, ty), at most n tiles; returns its y or null
-  groundBelow(tx, ty, n = 24) { for (let i = 0; i < n; i++) if (isSolid(this.get(tx, ty - i))) return ty - i; return null; },
-  // tile ray in metres; returns { d, x, y, tx, ty } of the first solid tile or null
+  chunks, rev: 0,
+  reset() { chunks.clear(); lastKey = NaN; last = null; this.rev++; },
+  // signed density in metres at a point, bilinear; positive inside rock
+  dens(x, y) {
+    const fx = x / CELL, fy = y / CELL, ix = Math.floor(fx), iy = Math.floor(fy), u = fx - ix, v = fy - iy;
+    const a = gd(ix, iy), b = gd(ix + 1, iy), c = gd(ix, iy + 1), e = gd(ix + 1, iy + 1);
+    return (a + (b - a) * u + (c - a) * v + (a - b - c + e) * u * v - 128) / 254;
+  },
+  solidAt(x, y) { return this.dens(x, y) > 0; },
+  matAt(x, y) { return gm(Math.round(x / CELL), Math.round(y / CELL)) & 127; },
+  wallAt(x, y) { return (gm(Math.round(x / CELL), Math.round(y / CELL)) & WALL) !== 0; },
+  // outward unit normal (toward air) into out, returns the gradient length
+  normal(x, y, out) {
+    const e = CELL, gx = this.dens(x + e, y) - this.dens(x - e, y), gy = this.dens(x, y + e) - this.dens(x, y - e), l = Math.hypot(gx, gy);
+    if (l < 1e-5) { out[0] = 0; out[1] = 1; return 0; } out[0] = -gx / l; out[1] = -gy / l; return l / (2 * e);
+  },
+  // distance to the surface in metres, positive in air; the field is a true distance near the surface
+  dist(x, y) { return -this.dens(x, y); },
+  // march a ray through the field; returns { d, x, y, mat } at the surface or null
   ray(x, y, dx, dy, max) {
-    const st = 0.12, n = Math.ceil(max / st);
-    for (let i = 1; i <= n; i++) { const px = x + dx * st * i, py = y + dy * st * i; const tx = Math.floor(px / TS), ty = Math.floor(py / TS); if (isSolid(this.get(tx, ty))) return { d: st * i, x: px, y: py, tx, ty }; }
+    let t = 0;
+    for (let i = 0; i < 400 && t < max; i++) {
+      const px = x + dx * t, py = y + dy * t, v = this.dens(px, py);
+      if (v > 0) { let a = Math.max(0, t - 0.2), b = t; for (let k = 0; k < 5; k++) { const mid = (a + b) / 2; if (this.dens(x + dx * mid, y + dy * mid) > 0) b = mid; else a = mid; } return { d: b, x: x + dx * b, y: y + dy * b, mat: this.matAt(x + dx * (b + 0.08), y + dy * (b + 0.08)) }; }
+      t += clamp(-v * 0.8, 0.05, 0.4);
+    }
     return null;
   },
+  // the ground under x: start at y + up (must be air), look down at most `down` metres; returns the surface y or null
+  groundY(x, y, up = 1.6, down = 16) {
+    let py = y + up; if (this.dens(x, py) > 0) return null;
+    for (let t = 0; t < down;) { const v = this.dens(x, py); if (v > 0) { let a = py, b = py + 0.25; for (let k = 0; k < 5; k++) { const mid = (a + b) / 2; if (this.dens(x, mid) > 0) a = mid; else b = mid; } return a; } const st = clamp(-v * 0.9, 0.06, 0.4); py -= st; t += st; }
+    return null;
+  },
+  // apply an SDF shape: sign -1 digs, +1 adds material `mat`. rate (m) limits the change of this call, scaled by the
+  // material hardness when digging. deny(matId) protects materials. acc[matId] gets kg removed (+) or added (-).
+  shape(x0, y0, x1, y1, sdf, sign, mat = M.PLATE, rate = 0, acc = NO, deny = null) {
+    const i0 = Math.floor(x0 / CELL) - 1, i1 = Math.ceil(x1 / CELL) + 1, j0 = Math.floor(y0 / CELL) - 1, j1 = Math.ceil(y1 / CELL) + 1; let changed = 0;
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      const c = chunk(i >> 6, j >> 6), q = ((j & 63) << 6) | (i & 63), old = c.d[q], mm = c.m[q] & 127, sd = sdf(i * CELL, j * CELL); let nv;
+      if (sign < 0) { const tg = 128 + sd * 254; if (tg >= old || (deny && deny(mm))) continue; nv = rate ? Math.max(tg, old - rate * 254 / MAT[mm].hard) : tg; }
+      else { const tg = 128 - sd * 254; if (tg <= old) continue; nv = rate ? Math.min(tg, old + rate * 254) : tg; }
+      nv = clamp(Math.round(nv), 0, 255); if (nv === old) continue;
+      const c0 = cov(old), c1 = cov(nv);
+      if (sign > 0 && c0 < 0.5 && mm !== mat) { if (acc !== NO) { acc[mm] = (acc[mm] || 0) + c0 * KG * MAT[mm].rho; acc[mat] = (acc[mat] || 0) - c1 * KG * MAT[mat].rho; } c.m[q] = mat | (c.m[q] & WALL); }
+      else if (acc !== NO && c0 !== c1) acc[mm] = (acc[mm] || 0) + (c0 - c1) * KG * MAT[mm].rho;
+      c.d[q] = nv; c.mod = true; changed++;
+    }
+    if (changed) this.rev++; return changed;
+  },
+  dig(x, y, r, rate, acc, deny) { return this.shape(x - r, y - r, x + r, y + r, circle(x, y, r), -1, 0, rate, acc, deny); },
+  fill(x, y, r, mat, rate, acc) { return this.shape(x - r, y - r, x + r, y + r, circle(x, y, r), 1, mat, rate, acc); },
+  box(x0, y0, x1, y1, sign, mat, acc) { const s = { t: 'b', x0, y0, x1, y1 }; return this.shape(x0, y0, x1, y1, (x, y) => stampSD(s, x, y), sign, mat, 0, acc); },
+  // kg of every material inside a rectangle of samples (tests, and the robots' terrain jobs)
+  mass(x0, y0, x1, y1, out = {}) {
+    const i0 = Math.floor(x0 / CELL) - 1, i1 = Math.ceil(x1 / CELL) + 1, j0 = Math.floor(y0 / CELL) - 1, j1 = Math.ceil(y1 / CELL) + 1;
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { const b = gd(i, j); if (b > 112) { const mm = gm(i, j) & 127; out[mm] = (out[mm] || 0) + cov(b) * KG * MAT[mm].rho; } }
+    return out;
+  },
+  // copy a window of samples (origin in sample indices) into two byte arrays, row by row
+  window(ox, oy, w, h, dOut, mOut) {
+    for (let cy = oy >> 6; cy <= (oy + h - 1) >> 6; cy++) for (let cx = ox >> 6; cx <= (ox + w - 1) >> 6; cx++) {
+      const c = chunk(cx, cy), bx = cx << 6, by = cy << 6, i0 = Math.max(ox, bx), i1 = Math.min(ox + w, bx + CH), j0 = Math.max(oy, by), j1 = Math.min(oy + h, by + CH);
+      for (let j = j0; j < j1; j++) { const s = ((j - by) << 6) + (i0 - bx), t = (j - oy) * w + (i0 - ox); dOut.set(c.d.subarray(s, s + i1 - i0), t); mOut.set(c.m.subarray(s, s + i1 - i0), t); }
+    }
+  },
+  sample(ix, iy) { return gd(ix, iy); }, sampleM(ix, iy) { return gm(ix, iy); },
+  // edited chunks only, run-length encoded
+  saveDiff() { const out = {}; for (const [k, c] of chunks) if (c.mod) out[k] = [rle(c.d), rle(c.m)]; return out; },
+  loadDiff(o) { this.reset(); for (const k in o) chunks.set(+k, { d: unrle(o[k][0]), m: unrle(o[k][1]), mod: true }); },
 };
+function rle(a) { const out = []; for (let i = 0; i < a.length;) { const v = a[i]; let n = 1; while (n < 255 && i + n < a.length && a[i + n] === v) n++; out.push(n, v); i += n; } let s = ''; for (let i = 0; i < out.length; i += 8192) s += String.fromCharCode.apply(null, out.slice(i, i + 8192)); return btoa(s); }
+function unrle(b64) { const s = atob(b64), a = new Uint8Array(N); let o = 0; for (let i = 0; i < s.length; i += 2) { const n = s.charCodeAt(i), v = s.charCodeAt(i + 1); a.fill(v, o, o + n); o += n; } return a; }
