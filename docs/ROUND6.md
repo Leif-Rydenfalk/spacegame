@@ -284,3 +284,101 @@ Leif, verbatim: "and if we scan and see a resource we need teh drones should be 
 
 ## Placement
 - **Round 6:** all of section N.
+
+## O. Smarter AI; robots help each other
+Leif, verbatim: "drones can carry the hauler if its stuck. the ai needs to be a lot smarter."
+
+- **Robots help robots.**
+  - A stuck hauler (no progress for N s, or no path) raises a rescue job.
+  - Drones whose combined lift exceeds the hauler's mass plus its load attach, lift and carry it to a reachable point, or carry its load in shares.
+  - The same applies to a toppled robot, one buried by a collapse (dig out), or one out of power (bring a cell or tow it).
+- **A smarter planner** (replace the greedy rules):
+  - Real pathfinding on the planet's voxel layers for ground robots (A* or a navigation graph that updates on terrain edits), plus flight paths for drones with lift and energy limits.
+  - One task market: every job (haul, build, mine, rescue, tidy, support, scan) has a value (priority × urgency) and a cost (time, energy, risk).
+  - Robots bid; assignments are re-planned every few seconds, with reservations so no two robots take the same item or spot.
+  - Batching: combine several pickups on one trip and plan multi-stop routes.
+  - Look-ahead: pre-stage inputs for queued builds before they start, and charge before long trips.
+  - Failure handling: detect and explain every failure (no path, too heavy, no power, no scan, danger), retry another way (another carrier, another source, call for help), and never silently idle.
+  - Danger-aware: avoid awake creatures and unsupported spans, and wait for turret cover.
+- **The AI's reasoning is visible:**
+  - every robot's current job and plan line;
+  - the queue's reasons;
+  - a short log of decisions ("hauler 3 stuck at 40 m E, drones 1+2 lifting it").
+- **Tests:**
+  - a scenario where a hauler gets stuck and is rescued;
+  - a batch-trip scenario;
+  - no idle robot while a valid job exists.
+
+## Placement
+- **Round 6:** all of section O (it is the core of "the system always works for you").
+
+## P. One suit that grows with you
+Leif, verbatim: "iwant otehe suti and systmss to be upgradable. the same exosuit and system i start with is the one i upgrade and put into the mech later and bigger and bigger"
+
+- **The exosuit you find in the wreck is a persistent, modular object** with an identity, condition and history. It is never replaced; it is upgraded.
+- **Slots (procedural parts):**
+  - frame;
+  - actuators (strength, speed);
+  - power cell and later a reactor mount;
+  - cooling;
+  - sensors (scanner, radar, camera);
+  - brain-interface core (compute, link range, how many robots it can direct);
+  - armour plates;
+  - tool and weapon mounts (adapters, as Leif described for the laser).
+- **Upgrades change real stats:** carry mass, speed, jump and jet, cooling budget, scan range and speed, armour by material and thickness. Installing one is a craft plus time; it is queued like anything else, and the AI can auto-upgrade it (section J) unless pinned.
+- **Systems are upgradable the same way:** the AI core, network, sensors, robots and the shared part model.
+- **Growth path:** the same suit docks into a mech frame as its cockpit and core. The mech is built around it, and later around the mech come bigger frames. The suit's core, interface and history carry through every size (suit, then mech, then larger walkers, and eventually the core can sit in a ship). Bigger frames scale strength, mass, power and weapons; the core you started with stays the centre.
+- **Placement:**
+  - Round 6: the suit as a modular persistent object with slots and stat-changing upgrades (needed by the suitless start in section N).
+  - Round 7: docking into a first mech frame.
+
+## Q. Progression: focus on now
+Leif, verbatim: "we need proper progression and focus on the now . seeing the launchpad at the start when you cant build it is not fun. only show what we can do right now and it should be a lot. or show waht we should do right now to increase and go to the next stage of automation."
+
+- **No future content at the start.**
+  - Remove the launch pad, rocket and any out-of-reach structures from the default start and from the build and craft menus until their tech is reachable.
+  - Dev scenarios keep them.
+- **Show only what you can do now, and make that a lot.**
+  - Every stage has a rich set of available actions, crafts, placements, upgrades and scans.
+  - Menus list only the doable (or doable with what is in reach, plus blueprint planning of unlocked items).
+- **Show the next step.** A quiet "next" panel (not a quest log) shows the 1-3 actions that advance automation right now, derived from the tech tree and the current bottleneck. For example:
+  - "scan the red layer east: likely iron 30 %";
+  - "assay station: lets drones use what you mine";
+  - "second furnace: iron is your bottleneck".
+  - Each has a short why.
+- **Stages of automation as the spine of progression:**
+  1. Suitless survival.
+  2. Suit online, robots working, hand mining and scanning.
+  3. First machines, assay, drone mining of scanned ore.
+  4. Lines and stockpiles; the global queue doing most of the work.
+  5. Shafts, heavy machinery and defence at scale.
+  6. Replicated sites around the planet.
+  7. Launch (only now does the pad appear).
+- Each stage unlocks a visible new capability and a bigger scale. The "next" panel always points at the current stage's exit.
+
+## Placement
+- **Round 6:** remove future content from the start; doable-only menus; the next-step panel; stages 1-4 tuned to play well.
+- **Round 7:** stages 5-7.
+
+## R. The body and brain are upgradable too
+Leif, verbatim: "everything is upgradable and replacable. even your human body and brain. once you have the bio tech for it in teh tech tree. with strength mutations and infinate life - after all youre going to survive 1000 years to complete this game."
+
+- **Your body is a modular system like the suit.**
+  - Organs and systems: muscles, bones, heart and lungs, skin, eyes, nervous system, brain.
+  - Each has condition and stats, and each can be replaced or upgraded.
+- **A biotech branch in the tech tree.** It is unlocked by scanning and sampling alien biology; the best biology sits near the hive nests (Leif, round 3).
+  - Strength mutations (muscle density, bone lattice), regeneration, toxin and heat tolerance, low-light eyes.
+  - Organ printing and replacement.
+  - Longevity treatments up to **indefinite life**, because the campaign spans about 1,000 years.
+  - Brain: augmentation of the interface core (more robots, faster links), memory backups, and later full replacement or continuity across bodies. This ties into the existing respawn rule: "your body respawns once you have built the machine to print a new one".
+- **Upgrades have real costs and trade-offs:** materials, power, time, rejection or instability risk for alien grafts, and how the advanced species and Earth see you.
+- **The same rule for everything:** every system (body, brain, suit, mech, robots, machines, sites) is made of replaceable parts with stats and upgrade paths.
+- **Placement:**
+  - Round 7: the body as modular parts with condition, plus the biotech branch's first nodes (mutations, organ printing).
+  - Longevity and brain continuity: listed in the design doc for later rounds.
+
+## S. Science, data, survival, rocket, remote presence
+See docs/SCIENCE.md (Leif's words verbatim, design and placement). Round 6 takes its round 6 list; round 7 takes the rest.
+
+## T. Frames and volumes, Earth-size planet, oxygen
+See docs/SHIPS.md (Leif's words verbatim, design and placement).
