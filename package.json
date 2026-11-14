@@ -1,0 +1,16 @@
+{
+  "name": "spacegame",
+  "version": "0.1.0",
+  "description": "spacegame demo 1: a dark bioluminescent surface act and a real-scale orbital act, one page, three.js",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5200",
+    "build": "vite build",
+    "preview": "vite preview --port 5200",
+    "check": "node tools/check.mjs"
+  },
+  "dependencies": { "three": "0.170.0" },
+  "devDependencies": { "vite": "5.4.11", "puppeteer-core": "22.15.0" }
+}
