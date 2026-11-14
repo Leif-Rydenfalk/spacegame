@@ -1,0 +1,13 @@
+# Round 5 (Leif, 2026-11-14, after playing round 4)
+
+Verbatim:
+
+> the collision is v3ry glitchy and dioesnt update for the charactr when flying down. i think there should be multiple layers in the foreground so you can choose to fall down or not the terrain background  needs to be rendered even after reming some terrain. the collision of depris and rock is very glitchy and it rotates wierly. we need a much more robust and stable and fat physics engine for rocks so it breaks down properly and behavies like ral rock. and the ai of the drone is very glitchy and doesnt work preoprly. it bhaves very strangely and odesnt fetch anything or craft anything for me. just like in fadctrio one inventroy slot equals one item you can place too. and "build mode" becomes blueprint mode and planning mode and you can still place things directly from your inventory. its the same inventory and you can either place things youi havre or things you dont have but then its clearly bliueprints so you can plan with a nice uiw chihc keeps everything the same and intuitive. and the same controls as factorio with tab too to enable blueprint mode and disable it. the same items but they allow you to plan. so you dont see what you cant craft or manufacture yet and its in the same crafting menu. you have to craft a furnace in your inventory before placing it like in factorio
+
+## Scope (fixes first, this is a robustness round)
+1. Player collision: robust against the voxel field at every speed, especially falling/jetting down (no tunnelling, no stale collision after the terrain changes).
+2. Layers: several foreground/passable layers so you choose to drop through or stand (platforms/ledges); a background wall layer that stays rendered after the terrain in front is removed (dug caves show rock wall behind, not void).
+3. Rock and debris physics: a robust, stable, fast rigid-body engine for rocks (proper contacts, friction, resting, sleeping, no weird spinning, no jitter), fracture so rock breaks down like real rock.
+4. Drone/robot AI: reliable: it fetches, carries and crafts what is needed, visibly, every time; no strange behaviour.
+5. Factorio-like inventory and placement: one inventory slot = one placeable item stack; you craft a furnace into the inventory before you place it. Same inventory, same crafting menu.
+6. Blueprint/planning mode replaces "build mode": Tab toggles it. In it you place the same items whether you have them or not; items you don't have are clearly ghost blueprints that the AI then builds. Things you cannot yet craft or manufacture are not shown. Controls as in Factorio otherwise.
