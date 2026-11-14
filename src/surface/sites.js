@@ -36,7 +36,7 @@ export function stepSites(dt) {
     for (const p of st.props) {
       const d = Math.hypot(p.x - P.x, p.y + 0.6 - P.y - 0.9);
       if (USE[p.t] && d < bd) { bd = d; sites.near = p; sites.hint = USE[p.t]; }
-      if (p.t === 'egg' && !s.hatched[p.i] && d < 6 && !s.dead) { s.hatched[p.i] = 1; spawnCreature('swarmer', p.x, p.y + 0.4); audio.play('bite'); events.emit('eggHatched'); for (let i = 0; i < 12; i++) S.parts.spawn({ x: p.x, y: p.y + 0.3, vx: rand(-3, 3), vy: rand(0, 5), life: rand(0.5, 1.5), size: rand(0.05, 0.1), c: mul(C.acid, 2), c2: mul(C.acid, 0.3), col: 1, bounce: 0.1 }); }
+      if (p.t === 'egg' && !s.hatched[p.i] && d < 6 && !s.dead) { s.hatched[p.i] = 1; spawnCreature('swarmer', p.x, p.y + 0.4).order = 'attack'; audio.play('bite'); events.emit('eggHatched'); for (let i = 0; i < 12; i++) S.parts.spawn({ x: p.x, y: p.y + 0.3, vx: rand(-3, 3), vy: rand(0, 5), life: rand(0.5, 1.5), size: rand(0.05, 0.1), c: mul(C.acid, 2), c2: mul(C.acid, 0.3), col: 1, bounce: 0.1 }); }
     }
   }
 }
@@ -49,7 +49,7 @@ export function siteUse() {
 }
 // the laser reaches the heart of a hive
 export function siteDamage(x, y, dmg) {
-  for (const st of structsIn(x - 2, x + 2)) if (st.kind === 'hive') { const s = stOf(st.id), h = st.props[1]; if (!s.dead && Math.hypot(h.x - x, h.y - y) < 1.5) { s.hp -= dmg; s.hurt = 0.15; if (s.hp <= 0) { s.dead = true; events.emit('hiveHeartKilled', st.id); S.give('ichor', 18); S.give('xeno core', 1); audio.play('groan'); for (let i = 0; i < 80; i++) S.parts.spawn({ x: h.x + rand(-1, 1), y: h.y + rand(-1, 1), vx: rand(-6, 6), vy: rand(-2, 8), life: rand(1, 4), size: rand(0.05, 0.14), c: mul(C.acid, 2.4), c2: mul(C.hot, 0.4), col: 1, bounce: 0.1 }); } return true; } }
+  for (const st of structsIn(x - 2, x + 2)) if (st.kind === 'hive') { const s = stOf(st.id), h = st.props[1]; if (!s.dead && Math.hypot(h.x - x, h.y - y) < 1.5) { s.hp -= dmg; s.hurt = 0.15; if (s.hp <= 0) { s.dead = true; events.emit('hiveHeartKilled', st.id); S.loose('ichor', 18, h.x, h.y); S.loose('xeno core', 1, h.x, h.y); audio.play('groan'); for (let i = 0; i < 80; i++) S.parts.spawn({ x: h.x + rand(-1, 1), y: h.y + rand(-1, 1), vx: rand(-6, 6), vy: rand(-2, 8), life: rand(1, 4), size: rand(0.05, 0.14), c: mul(C.acid, 2.4), c2: mul(C.hot, 0.4), col: 1, bounce: 0.1 }); } return true; } }
   return false;
 }
 export function drawSites(b, time) {

@@ -1,7 +1,7 @@
 {
   "name": "spacegame",
-  "version": "0.2.0",
-  "description": "spacegame demo 1, round 2: a voxel bioluminescent surface act with a hivemind, and a real-scale orbital act, one page, three.js",
+  "version": "0.3.0",
+  "description": "spacegame demo 1, round 3: a many-layered living forest, a carried reactor and ship laser, loose matter, wary ecology and a demand and supply AI on a smooth voxel world, and a real-scale orbital act, one page, three.js",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",

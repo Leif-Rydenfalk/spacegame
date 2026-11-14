@@ -11,8 +11,8 @@ import { inv, ITEMS } from '../items.js';
 import { F, DEFS, canPlace, place, removeMachine, machineAt, drawMachine } from './factory.js';
 
 export const WALL_KG = +(MAT[M.PLATE].rho * SLAB * TS * TS).toFixed(3);       // iron in one 0.5 m wall block
-export const BUILD = ['belt', 'miner', 'furnace', 'assembler', 'chest', 'hub', 'bio-printer', 'pad', 'wall'];
-export const BUILD_T = { belt: 0.6, wall: 0.5, miner: 3, furnace: 3, assembler: 4, chest: 2, hub: 4, 'bio-printer': 6, pad: 8 };
+export const BUILD = ['belt', 'miner', 'furnace', 'assembler', 'chest', 'hub', 'bio-printer', 'pad', 'wall', 'antenna'];
+export const BUILD_T = { belt: 0.6, wall: 0.5, miner: 3, furnace: 3, assembler: 4, chest: 2, hub: 4, 'bio-printer': 6, pad: 8, antenna: 2 };
 export const costOf = k => k === 'wall' ? { iron: WALL_KG } : { [k]: 1 };
 export const BP = { ghosts: [], clears: [], sel: 0, rot: 1, tool: 'place', drag: null, hand: null, nextId: 1 };
 const foot = k => k === 'wall' ? { w: 1, h: 1 } : DEFS[k];
@@ -39,7 +39,7 @@ export function stepBlueprint(dt) {
   const P = S.P, gx = Math.floor(S.mouse.x / TS), gy = Math.floor(S.mouse.y / TS);
   if (input.hit('b') && !S.uiOpen) { S.mode = S.mode === 'blueprint' ? 'build' : 'blueprint'; BP.tool = 'place'; BP.drag = null; audio.play('click'); events.emit('blueprintMode'); }
   if (S.mode === 'blueprint' && !S.uiOpen) {
-    for (let i = 0; i < BUILD.length; i++) if (input.hit(String(i + 1))) { BP.sel = i; BP.tool = 'place'; }
+    for (let i = 0; i < BUILD.length; i++) if (input.hit(String((i + 1) % 10))) { BP.sel = i; BP.tool = 'place'; }
     if (input.wheel) { BP.sel = (BP.sel + (input.wheel > 0 ? 1 : BUILD.length - 1)) % BUILD.length; BP.tool = 'place'; }
     if (input.hit('r')) { BP.rot = -BP.rot; audio.play('click'); }
     if (input.hit('x')) BP.tool = BP.tool === 'decon' ? 'place' : 'decon';

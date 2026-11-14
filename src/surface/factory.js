@@ -18,6 +18,7 @@ export const DEFS = {
   furnace: { w: 2, h: 2, hp: 220, takes: ['iron ore', 'copper ore', 'biomass'], noise: 20, poll: 0.9 },
   assembler: { w: 3, h: 2, hp: 200, noise: 24, poll: 0.2 },
   chest: { w: 2, h: 2, hp: 120 },
+  antenna: { w: 1, h: 4, hp: 80 },
   hub: { w: 2, h: 2, hp: 180, takes: ['drone'] },
   'bio-printer': { w: 2, h: 3, hp: 200 },
   pad: { w: 7, h: 1, hp: 500, takes: ['part'] },
@@ -61,7 +62,7 @@ const outTotal = m => { let s = 0; for (const k in m.out) s += m.out[k] * ITEMS[
 // E: the nearest machine. The finished pad is boarded; everything else opens its window.
 export function nearest(range = 3.2) {
   const P = S.P; let best = null, bd = range;
-  for (const m of F.machines) { if (m.kind === 'belt') continue; const d = Math.hypot((m.x + m.w / 2) * TS - P.x, (m.y + m.h / 2) * TS - P.y - 0.9); if (d < bd) { bd = d; best = m; } }
+  for (const m of F.machines) { if (m.kind === 'belt' || m.kind === 'antenna') continue; const d = Math.hypot((m.x + m.w / 2) * TS - P.x, (m.y + m.h / 2) * TS - P.y - 0.9); if (d < bd) { bd = d; best = m; } }
   return best;
 }
 // quick transfer: everything the machine takes goes in, everything it made comes out
@@ -145,6 +146,12 @@ export function drawMachine(b, m, time, a = 1, ghost = false) {
   } else if (m.kind === 'bio-printer') {
     const p = 0.7 + 0.3 * Math.sin(time * 1.5); A(cx, y + 0.15, w, 0.3, 0, mul(C.steel, 0.6), 1, 0, md, 2); A(cx, y + h - 0.1, w, 0.2, 0, mul(C.steel, 0.6), 1, 0, md, 3);
     b.add(cx, y + h / 2, w * 0.6, h - 0.5, 0, mul(C.cyan, 0.12 * p), a, 0, 2); if (!ghost) { b.add(cx, y + h / 2, 0.16, h - 0.7, 0, mul(C.cyan, 0.9 * p), 0.8, 1, 2); light.emit(m.x + 1, m.y + 1.5, 0.02 * p, 0.5 * p, 0.36 * p); }
+  } else if (m.kind === 'antenna') {     // the network: a mast, two cross-arms, a dish that turns to listen, a light that says it is up
+    const p = 0.5 + 0.5 * Math.sin(time * 2.2 + m.seed), top = y + h + 0.5;
+    A(cx, y + 0.12, 0.42, 0.24, 0, mul(C.steel, 0.6), 1, 0, md, 2); b.seg(cx, y + 0.2, cx, top, 0.06, tint(C.steel), a, 0, md); for (const d of [-1, 1]) b.seg(cx, y + 1.1, cx + d * 0.4, y + 0.02, 0.018, tint(mul(C.steel, 0.6)), a, 0, md);
+    for (let i = 0; i < 2; i++) b.seg(cx - 0.26 + i * 0.06, y + 1.5 + i * 0.5, cx + 0.26 - i * 0.06, y + 1.5 + i * 0.5, 0.03, tint(C.steel), a, 0, md);
+    A(cx + 0.14 * Math.sin(time * 0.4 + m.seed), top - 0.25, 0.3, 0.22, 0.5 * Math.sin(time * 0.4 + m.seed), mul(C.hull, 0.5), 1, 8, md, 3);
+    if (!ghost) { b.add(cx, top + 0.04, 0.07, 0.07, 0, mul(C.cyan, 1.5 + 2 * p), 1, 1, 2); b.add(cx, top, 1.4, 1.4, 0, mul(C.cyan, 0.16 * p), 1, 1, 2); light.emit(m.x + 0.5, top / TS, 0.02, 0.3 * p, 0.24 * p); }
   } else if (m.kind === 'chest') {
     A(cx, y + h * 0.4, w, h * 0.8, 0, mul(C.steel, 0.5), 1, 0, md, 3); A(cx, y + h * 0.8, w + 0.06, 0.1, 0, C.dark); A(cx, y + h * 0.45, 0.14, 0.1, 0, mul(C.steel, 1.4)); for (const s of [-1, 1]) A(cx + s * w * 0.36, y + h * 0.4, 0.05, h * 0.8, 0, C.dark);
     if (!ghost) b.add(cx, y + h * 0.62, 0.05, 0.05, 0, mul(C.amber, 1.6), 1, 1, 2);

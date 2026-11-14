@@ -1,73 +1,23 @@
-// the living world: layered alien forest generated per chunk from the seed and anchored to whatever ground is there.
-// Giant bioluminescent trees with swaying canopies and roots into the terrain, lantern stalks, weeping vine trees,
-// fronds, grass, fungal shelves, cave fungi, hanging vines and pods, and drifting spores. Everything is drawn through
-// the instanced sprite batch, throws light into the light field, and can be cut for organic material.
-import { hash, rng, rand, noise2 } from '../core.js';
+// the living world in the play plane: plants generated per chunk from the seed and anchored to whatever ground is
+// there (flora-gen.js holds the species). Every plant is a damped spring driven by the travelling wind; it bends away
+// from whatever pushes through it (the player, creatures), shakes when hit, scorches on hot ground, and when it is cut
+// its matter falls to the ground as loose material. It throws light into the light field.
+import { hash, rng, rand, clamp } from '../core.js';
 import { world, CELL, CH, TS, M } from './world.js';
 import { biome, lushness } from './gen.js';
 import { light } from './light.js';
-import { S, C, mul, mix } from './state.js';
+import { heat } from './heat.js';
+import { S, mul } from './state.js';
+import { genPlant, drawPlant, wind, PAL } from './flora-gen.js';
 const blocks = new Map(); let active = [];
-export const flora = { dead: new Set(), count: 0, gains: null, clear: null };       // clear = [x0, x1]: a scenario's building site, kept free of trees
-const GLOW = [C.cyan, C.violet, C.acid], BARK = [[0.03, 0.045, 0.05], [0.045, 0.03, 0.055], [0.04, 0.045, 0.025]], LEAF = [[0.02, 0.07, 0.065], [0.05, 0.025, 0.08], [0.035, 0.07, 0.02]];
-const YIELD = { tree: { biomass: 30, fibre: 6, resin: 2 }, frond: { biomass: 1.6, fibre: 0.8 }, bulb: { biomass: 0.6, lumen: 0.15 }, grass: { fibre: 0.12 }, fungi: { biomass: 0.9 }, vine: { fibre: 0.5 }, pod: { resin: 0.6, biomass: 0.4 }, shelf: { biomass: 0.5 } };
-// a plant: prims = flat rows [kind(0 seg,1 blob), x1, y1, x2|w, y2|h, w|rot, r, g, b, a, shape, mode, sway1, sway2]
-function plant(id, type, x, y, bi, front) { return { id, type, x, y, bi, front, prims: [], lights: [], hp: 1, top: y, hw: 0.3, ph: hash(Math.floor(x * 7), Math.floor(y * 7), 91) * 6.28, fall: 0, anchor: 1 }; }
-const seg = (p, x1, y1, x2, y2, w, c, a = 1, mode = 1, shape = 2) => { const H = Math.max(1, p.H || 1); p.prims.push([0, x1, y1, x2, y2, w, c[0], c[1], c[2], a, shape, mode, sw(p, y1, H), sw(p, y2, H)]); };
-const blob = (p, x, y, w, h, rot, c, a = 1, mode = 1, shape = 7) => { const H = Math.max(1, p.H || 1), s = sw(p, y, H); p.prims.push([1, x, y, w, h, rot, c[0], c[1], c[2], a, shape, mode, s, s]); };
-const sw = (p, y, H) => { const t = Math.max(0, (y - p.y) * p.anchor) / H; return t * Math.sqrt(t) * (p.flex || 0.3); };
-const lit = (p, x, y, c, k) => p.lights.push(x, y, c[0] * k, c[1] * k, c[2] * k);
-
-function tree(p, r, lush) {
-  const bi = p.bi, g = GLOW[bi], bark = BARK[bi], leaf = LEAF[bi], H = p.H = (bi === 1 ? 6 : 7) + r() * (bi === 0 ? 9 : 7) * (0.6 + lush * 0.5), w0 = 0.3 + H * 0.028;
-  p.flex = 0.25 + H * 0.03; p.hp = 3 + H * 0.5; p.hw = w0 * 0.9; p.yieldK = H / 10;
-  for (let i = 0; i < 4; i++) { const d = (i % 2 ? 1 : -1) * (0.5 + r() * 1.2), dy = -(0.6 + r() * 1.5); seg(p, p.x + d * 0.15, p.y + 0.25, p.x + d * 0.7, p.y + dy * 0.4, w0 * 0.55, bark); seg(p, p.x + d * 0.7, p.y + dy * 0.4, p.x + d * 1.3, p.y + dy, w0 * 0.25, mul(bark, 0.8)); }
-  const stems = bi === 1 ? 2 + Math.floor(r() * 2) : 1;
-  for (let s = 0; s < stems; s++) {
-    let x = p.x + (s - (stems - 1) / 2) * 0.25, y = p.y - 0.1, bend = (r() - 0.5) * 0.4 + (s - (stems - 1) / 2) * 0.3; const n = 6, hs = H * (stems > 1 ? 0.7 + r() * 0.3 : 1), tips = [];
-    for (let i = 0; i < n; i++) {
-      const t = i / n, nx = x + bend * hs / n + Math.sin(t * 5 + p.ph) * 0.14, ny = y + hs / n, w = w0 * (1 - t * 0.68) / (stems > 1 ? 1.5 : 1);
-      seg(p, x, y, nx, ny, w, mul(bark, 1 - 0.25 * (i % 2)));
-      if (i % 2 === 1 && r() < 0.8) seg(p, x + w * 0.2, y + 0.1, x + w * 0.2, y + 0.5 + r() * 0.7, 0.035, mul(g, 0.5), 0.8, 2);                  // sap veins
-      if (bi !== 1 && i >= 2 && i < n - 1 && r() < 0.75) { const d = r() < 0.5 ? -1 : 1, bl = 1 + r() * (bi === 2 ? 3 : 1.8), bx = nx + d * bl, by = ny + bl * (bi === 2 ? 0.25 : 0.5); seg(p, nx, ny, bx, by, w * 0.45, bark); tips.push([bx, by, 0.55 + r() * 0.3]); }
-      if (i > 0 && i < n - 1 && r() < 0.35) { const d = r() < 0.5 ? -1 : 1; blob(p, x + d * w * 0.8, y + 0.2, 0.5 + r() * 0.3, 0.3, 0, mix(bark, g, 0.12), 1, 1, 8); blob(p, x + d * w * 0.8, y + 0.16, 0.5, 0.12, 0, g, 0.5, 2, 1); }
-      x = nx; y = ny;
-    }
-    tips.push([x, y, 1]); p.top = Math.max(p.top, y);
-    for (const [tx, ty, k] of tips) {
-      if (bi === 0) {            // broad cap with a lit underside and hanging threads
-        const cw = (2.6 + r() * 2.6) * k * (0.7 + lush * 0.4), chh = cw * 0.32;
-        blob(p, tx, ty - 0.05, cw * 0.9, chh * 0.5, 0, mul(g, 0.9), 0.55, 2, 1); blob(p, tx, ty, cw, chh * 2, 0, mix(leaf, bark, 0.3), 1, 1, 8); blob(p, tx - cw * 0.12, ty + chh * 0.55, cw * 0.5, chh * 0.6, 0, mul(leaf, 1.6), 0.8, 1, 7);
-        for (let j = 0; j < 5 * k; j++) { const vx = tx + (r() - 0.5) * cw * 0.85, vl = 0.3 + r() * 1.5; seg(p, vx, ty, vx + (r() - 0.5) * 0.1, ty - vl, 0.03, mul(g, 0.35), 0.9, 2); blob(p, vx, ty - vl, 0.09, 0.09, 0, mul(g, 2.2), 1, 2, 1); }
-        lit(p, tx, ty - 0.5, g, 0.5 * k + 0.2);
-      } else if (bi === 1) {     // lantern bulbs in a husk, drooping fronds below
-        const bs = 0.5 + r() * 0.5;
-        for (let j = 0; j < 5; j++) { const a = -0.3 - j * 0.55 + r() * 0.3, fl = 1 + r() * 1.4; seg(p, tx, ty - 0.2, tx + Math.cos(a) * fl * (j % 2 ? 1 : -1), ty - 0.2 + Math.sin(a) * fl, 0.07, leaf); }
-        blob(p, tx, ty + bs * 0.4, bs * 2.6, bs * 2.6, 0, mul(g, 0.5), 0.6, 2, 1); blob(p, tx, ty + bs * 0.4, bs, bs * 1.25, 0, mul(g, 1.4), 0.95, 2, 2); blob(p, tx, ty + bs * 0.5, bs * 0.4, bs * 0.5, 0, [1.4, 0.9, 3], 1, 2, 1); blob(p, tx, ty + bs * 0.05, bs * 1.1, bs * 0.5, 0, bark, 1, 1, 8);
-        lit(p, tx, ty + bs * 0.4, g, 0.75);
-      } else {                   // weeping crown: leaf masses and curtains of beaded vines
-        const cw = (1.8 + r() * 1.6) * k;
-        for (let j = 0; j < 3; j++) blob(p, tx + (r() - 0.5) * cw, ty + (r() - 0.3) * 0.7, cw * (0.6 + r() * 0.5), cw * 0.42, (r() - 0.5) * 0.5, mul(leaf, 0.8 + r() * 0.7), 1, 1, 7);
-        for (let j = 0; j < 7 * k; j++) { const vx = tx + (r() - 0.5) * cw * 1.2, vl = 1 + r() * (2.5 + lush * 2); let yy = ty - 0.1; for (let q = 0; q < 3; q++) { seg(p, vx + Math.sin(q + j) * 0.05, yy, vx + Math.sin(q + 1 + j) * 0.05, yy - vl / 3, 0.035, mul(leaf, 1.3), 1, 1); yy -= vl / 3; } blob(p, vx, yy, 0.1, 0.1, 0, mul(g, 1.8), 1, 2, 1); }
-        lit(p, tx, ty - 1, g, 0.3 * k + 0.1);
-      }
-    }
-  }
-}
-function small(p, r, lush) {
-  const bi = p.bi, g = GLOW[bi], leaf = LEAF[bi], t = p.type, up = p.anchor;
-  if (t === 'frond') { const n = 5 + Math.floor(r() * 5), L = (0.7 + r() * 1.3) * (0.7 + lush * 0.5); p.H = L; p.flex = 0.25; p.top = p.y + L; for (let i = 0; i < n; i++) { const a = (i / (n - 1) - 0.5) * 2.2, mx = p.x + Math.sin(a) * L * 0.45, my = p.y + Math.cos(a) * L * 0.6, ex = p.x + Math.sin(a) * L * 0.95, ey = p.y + Math.cos(a) * L * 0.72 - Math.abs(Math.sin(a)) * L * 0.25, c = mul(leaf, 0.9 + (i % 3) * 0.35); seg(p, p.x, p.y, mx, my, 0.07, c); seg(p, mx, my, ex, ey, 0.045, c); if (i % 2 === 0) blob(p, ex, ey, 0.06, 0.06, 0, mul(g, 1.5), 0.9, 2, 1); } lit(p, p.x, p.y + L * 0.6, g, 0.12); }
-  else if (t === 'bulb') { const L = 0.5 + r() * 1.1; p.H = L; p.flex = 0.2; p.top = p.y + L; const bx = p.x + (r() - 0.5) * 0.3; seg(p, p.x, p.y, bx, p.y + L, 0.05, mul(leaf, 1.2)); blob(p, bx, p.y + L, 0.85, 0.85, 0, mul(g, 0.45), 0.6, 2, 1); blob(p, bx, p.y + L, 0.24, 0.3, 0, mul(g, 1.8), 1, 2, 2); seg(p, p.x, p.y, p.x + 0.3, p.y + 0.25, 0.05, leaf); seg(p, p.x, p.y, p.x - 0.28, p.y + 0.2, 0.05, leaf); lit(p, bx, p.y + L, g, 0.45); }
-  else if (t === 'grass') { const n = 3 + Math.floor(r() * 4); p.H = 0.5; p.flex = 0.12; for (let i = 0; i < n; i++) { const L = 0.15 + r() * 0.42 * (0.6 + lush * 0.6), a = (r() - 0.5) * 1.1; seg(p, p.x + (i - n / 2) * 0.05, p.y - 0.03, p.x + (i - n / 2) * 0.05 + Math.sin(a) * L, p.y + Math.cos(a) * L, 0.028, mul(leaf, 1 + r())); } if (r() < 0.25) blob(p, p.x, p.y + 0.3, 0.05, 0.05, 0, mul(g, 1.6), 0.9, 2, 1); }
-  else if (t === 'fungi') { const n = 2 + Math.floor(r() * 3); p.H = 0.6; p.flex = 0.05; for (let i = 0; i < n; i++) { const fx = p.x + (i - (n - 1) / 2) * 0.24 + (r() - 0.5) * 0.1, L = 0.18 + r() * 0.45, cw = 0.2 + r() * 0.22; seg(p, fx, p.y - 0.02, fx + (r() - 0.5) * 0.06, p.y + L, 0.045, mul(g, 0.14)); blob(p, fx, p.y + L - 0.02, cw * 1.3, 0.07, 0, mul(g, 1.9), 0.9, 2, 1); blob(p, fx, p.y + L, cw, cw * 0.9, 0, mix(leaf, g, 0.1), 1, 1, 8); } blob(p, p.x, p.y + 0.3, 1.3, 0.9, 0, mul(g, 0.25), 0.5, 2, 1); lit(p, p.x, p.y + 0.4, g, 0.5); }
-  else if (t === 'vine') { const L = 0.6 + r() * 2.6 * (0.5 + lush * 0.6), n = Math.max(2, Math.ceil(L / 0.5)); p.H = L; p.flex = 0.3; let x = p.x, y = p.y + 0.04; for (let i = 0; i < n; i++) { const nx = p.x + Math.sin(i * 1.3 + p.ph) * 0.09, ny = y - L / n; seg(p, x, y, nx, ny, 0.04, mul(leaf, 1.2)); if (i % 2) blob(p, nx, ny, 0.09, 0.09, 0, mul(g, 1.5), 0.95, 2, 1); x = nx; y = ny; } p.top = p.y; lit(p, p.x, p.y - L * 0.7, g, 0.14); }
-  else if (t === 'pod') { p.H = 0.8; p.flex = 0.15; seg(p, p.x, p.y + 0.03, p.x, p.y - 0.25, 0.04, leaf); blob(p, p.x, p.y - 0.5, 1.2, 1.2, 0, mul(C.violet, 0.4), 0.6, 2, 1); blob(p, p.x, p.y - 0.5, 0.36, 0.5, 0, mul(C.violet, 0.9), 0.95, 2, 2); blob(p, p.x, p.y - 0.52, 0.14, 0.2, 0, [1.4, 0.9, 3], 1, 2, 1); lit(p, p.x, p.y - 0.5, C.violet, 0.5); }
-  else if (t === 'shelf') { const d = p.side || 1, n = 2 + Math.floor(r() * 3); p.H = 1; p.flex = 0; for (let i = 0; i < n; i++) { const yy = p.y + i * 0.3, w = 0.35 + r() * 0.4; blob(p, p.x + d * w * 0.3, yy - 0.03, w * 1.2, 0.08, 0, mul(g, 1.4), 0.8, 2, 1); blob(p, p.x + d * w * 0.3, yy, w, 0.26, 0, mix(BARK[bi], g, 0.14), 1, 1, 8); } lit(p, p.x + d * 0.3, p.y + 0.3, g, 0.25); }
-  p.hw = t === 'grass' ? 0.2 : 0.35;
-}
+// clear = [x0, x1]: a scenario's building site, kept free of trees. drop(id, n, x, y) puts cut matter into the world.
+// pushers = [{ x, y, vx, r, h }] bodies that bend plants this frame.
+export const flora = { dead: new Set(), count: 0, drop: null, clear: null, pushers: [], blast: null, get active() { return active; } };
+const YIELD = { tree: { biomass: 30, fibre: 6, resin: 2 }, fern: { biomass: 1.6, fibre: 0.8 }, paddle: { biomass: 1.2, fibre: 0.5 }, bulb: { biomass: 0.6, lumen: 0.15 }, reed: { fibre: 0.9 }, fungi: { biomass: 0.9 }, vine: { fibre: 0.5 }, pod: { resin: 0.6, biomass: 0.4 }, shelf: { biomass: 0.5 } };
 const natural = k => k >= M.SOIL && k <= M.LUMEN, grows = k => natural(k) || k === M.XENO || k === M.CONCRETE;
+const pick = (h, table) => { let a = 0; for (let i = 0; i < table.length; i += 2) { a += table[i + 1]; if (h < a) return table[i]; } return null; };
 function build(cx, cy) {
-  const out = [], X0 = cx * CH * CELL, Y0 = cy * CH * CELL, sI = cx * CH, sJ = cy * CH;
+  const out = [], sI = cx * CH, sJ = cy * CH;
   for (let c = 0; c < 32; c++) {
     const i = sI + c * 2 + 1, x = i * CELL, lush = lushness(x), bi = biome(x); let prev = world.sample(i, sJ + CH) >= 128;
     for (let j = CH - 1; j >= 0; j--) {
@@ -75,13 +25,17 @@ function build(cx, cy) {
       if (sol !== prev) {
         const y = sol ? (iy + 1) * CELL - 0.06 : (iy + 0.6) * CELL, k = world.sampleM(i, iy + (sol ? 0 : 1)) & 127, cave = (world.sampleM(i, iy + (sol ? 2 : -2)) & 128) !== 0, h1 = hash(i, iy, 80), h2 = hash(i, iy, 81), id = i + ',' + iy;
         if (grows(k) && !flora.dead.has(id) && lush > 0.02) {
-          const dens = natural(k) ? lush : lush * 0.45; let type = null, front = h2 < 0.3;
-          if (sol && !cave) { type = c % 8 === Math.floor(hash(cx, cy, 82) * 8) % 8 && natural(k) && h1 < 0.3 + dens * 0.45 ? 'tree' : h1 < 0.1 * dens ? 'bulb' : h1 < 0.3 * dens ? 'frond' : h1 < 0.3 * dens + 0.5 ? 'grass' : null; if (type === 'tree') front = h2 < 0.14; }
-          else if (sol) type = h1 < 0.1 * dens ? 'fungi' : h1 < 0.14 * dens ? 'bulb' : h1 < 0.2 * dens ? 'frond' : h1 < 0.5 * dens ? 'grass' : null;
-          else type = h1 < 0.22 * dens ? 'vine' : h1 < 0.26 * dens && natural(k) ? 'pod' : null;
-          if (type === 'tree' && (world.dens(x, y + 2.5) > 0 || world.dens(x, y + 5) > 0)) type = 'frond';
-          if (flora.clear && x > flora.clear[0] && x < flora.clear[1] && (type === 'tree' || type === 'frond' || type === 'bulb')) type = 'grass';
-          if (type) { const p = plant(id, type, x + (h2 - 0.5) * 0.15, y, bi, front), r = rng(Math.floor(h1 * 1e9) ^ (i * 7919)); if (!sol) p.anchor = -1; if (type === 'tree') tree(p, r, lush); else small(p, r, lush); out.push(p); }
+          const d = natural(k) ? lush : lush * 0.45; let type = null, front = h2 < 0.1;
+          if (sol && !cave) {
+            if (c % 8 === Math.floor(hash(cx, cy, 82) * 8) % 8 && natural(k) && h1 < 0.3 + d * 0.45) { type = 'tree'; front = h2 < 0.07; }
+            else type = pick(h1, ['bulb', 0.06 * d, 'fern', 0.2 * d, 'paddle', 0.1 * d, 'reed', bi === 2 ? 0.1 * d : 0.03 * d, 'flower', 0.035 * d, 'fungi', bi === 0 ? 0.08 * d : 0.03 * d, 'root', 0.05 * d, 'moss', 0.1, 'grass', 0.42]);
+          } else if (sol) type = pick(h1, ['fungi', 0.14 * d, 'bulb', 0.05 * d, 'fern', 0.08 * d, 'moss', 0.14 * d, 'root', 0.04 * d, 'grass', 0.3 * d]);
+          else type = pick(h1, ['vine', 0.2 * d, 'threads', 0.12 * d, 'pod', natural(k) ? 0.04 * d : 0]);
+          if (type === 'tree' && (world.dens(x, y + 2.5) > 0 || world.dens(x, y + 5) > 0)) type = 'fern';
+          if (type === 'grass' || type === 'moss' || type === 'reed') front = h2 < 0.45;
+          if (flora.clear && x > flora.clear[0] && x < flora.clear[1] && type !== 'grass' && type !== 'moss' && !(!sol)) type = 'grass';
+          if (type) { const gen = genPlant(type, bi, rng(Math.floor(h1 * 1e9) ^ (i * 7919)), lush, sol ? null : { anchor: -1 });
+            out.push({ id, type, x: x + (h2 - 0.5) * 0.15, y, bi, front, gen, anchor: gen.anchor, hp: gen.hp, top: y + gen.top, hw: gen.hw, H: gen.H, ph: hash(i, iy, 91) * 6.28, fall: 0, b: 0, bv: 0, shake: 0 }); }
         }
       }
       prev = sol;
@@ -96,19 +50,26 @@ export function stepFlora(dt) {
   for (let cy = y0; cy <= y1; cy++) for (let cx = x0; cx <= x1; cx++) { const k = cx * 4096 + cy; let b = blocks.get(k); if (!b) { b = build(cx, cy); blocks.set(k, b); } for (const p of b) active.push(p); }
   if (blocks.size > 220) for (const k of blocks.keys()) { const cx = Math.round(k / 4096); if (Math.abs(cx - (x0 + x1) / 2) > 8) blocks.delete(k); if (blocks.size < 160) break; }
   flora.count = active.length;
-  // falling and uprooted plants
+  // falling, uprooted and scorched plants
   scanT -= dt; const scan = scanT <= 0; if (scan) scanT = 0.4;
   for (const p of active) {
+    if (p.gone) continue;
     if (p.fall > 0) { p.fall += dt * (0.6 + p.fall * 1.6); if (p.fall >= 1.5) kill(p, true); continue; }
-    if (scan && !p.gone && world.dens(p.x, p.y - 0.3 * p.anchor) <= 0 && world.dens(p.x, p.y - 0.12 * p.anchor) <= 0) { if (p.type === 'tree') p.fall = 0.01; else kill(p, false); }
+    if (!scan) continue;
+    if (world.dens(p.x, p.y - 0.3 * p.anchor) <= 0 && world.dens(p.x, p.y - 0.12 * p.anchor) <= 0) { if (p.type === 'tree') p.fall = 0.01; else kill(p, false); }
+    else if (p.type !== 'tree' && heat.at(p.x, p.y - 0.1 * p.anchor) > 0.42) burn(p);
   }
-  // drifting spores
-  if (active.length && Math.random() < dt * 14) { const p = active[Math.floor(Math.random() * active.length)]; if (p.lights.length && !p.gone && Math.abs(p.x - cam.x) < 16) S.parts.spawn({ x: p.lights[0] + rand(-0.6, 0.6), y: p.lights[1] + rand(-0.4, 0.4), vx: rand(-0.25, 0.25), vy: rand(0.02, 0.3), life: rand(4, 9), size: rand(0.03, 0.06), c: mul(GLOW[p.bi], 1.6), grav: -0.004, drag: 0.4 }); }
+}
+function burn(p) {
+  if (p.gone) return; p.gone = true; flora.dead.add(p.id);
+  for (let i = 0; i < 7; i++) S.parts.spawn({ x: p.x + rand(-0.3, 0.3), y: p.y + rand(0, Math.max(0.2, (p.top - p.y) * p.anchor)) * p.anchor, vx: rand(-0.6, 0.6), vy: rand(0.4, 2.2), life: rand(0.6, 2.2), size: rand(0.03, 0.07), c: [3.5, 1.3, 0.2], c2: [0.4, 0.03, 0.01], grav: -0.08, drag: 0.8 });
+  S.parts.spawn({ x: p.x, y: p.y + 0.3, vx: rand(-0.2, 0.2), vy: rand(0.4, 0.9), life: rand(1.5, 3), size: rand(0.3, 0.5), grow: 2.4, c: [0.1, 0.095, 0.09], mode: 1, a: 0.28, grav: -0.03, drag: 0.8 });
 }
 function kill(p, give) {
   if (p.gone) return; p.gone = true; flora.dead.add(p.id);
-  const y = YIELD[p.type], k = p.yieldK || 1; if (give && y) for (const id in y) { const n = y[id] * k * (0.8 + hash(p.x * 9 | 0, 3, 84) * 0.4); S.add(id, n); if (flora.gains) flora.gains(id, n); }
-  const g = GLOW[p.bi]; for (let i = 0; i < (p.type === 'tree' ? 40 : 6); i++) S.parts.spawn({ x: p.x + rand(-0.5, 0.5) + (p.type === 'tree' ? rand(-2, 2) : 0), y: p.y + rand(0, Math.max(0.3, (p.top - p.y) * (p.type === 'tree' ? 0.3 : 1))), vx: rand(-1.5, 1.5), vy: rand(0, 2.5), life: rand(1, 3.5), size: rand(0.04, 0.09), c: mul(g, 2), c2: mul(g, 0.3), col: 1, bounce: 0.1 });
+  const y = YIELD[p.type], k = p.gen.yieldK || 1, tree = p.type === 'tree', dir = p.dir || 1;
+  if (give && y && flora.drop) for (const id in y) { const n = y[id] * k * (0.8 + hash(p.x * 9 | 0, 3, 84) * 0.4), parts = tree ? 4 : 1; for (let i = 0; i < parts; i++) flora.drop(id, n / parts, p.x + (tree ? dir * (1 + i * p.H * 0.2) : rand(-0.2, 0.2)), p.y + 0.4 + rand(0, 0.4)); }
+  const g = PAL[p.bi].g; for (let i = 0; i < (tree ? 46 : 6); i++) S.parts.spawn({ x: p.x + rand(-0.5, 0.5) + (tree ? dir * rand(0, p.H) : 0), y: p.y + rand(0, Math.max(0.3, (p.top - p.y) * (tree ? 0.12 : 1))), vx: rand(-1.5, 1.5), vy: rand(0, 2.5), life: rand(1, 3.5), size: rand(0.04, 0.09), c: mul(g, 2), c2: mul(g, 0.3), col: 1, bounce: 0.1 });
 }
 // the laser, bullets and creatures damage plants along their spine; returns true when something was hit
 export function floraHit(x, y, dmg, r = 0.3) {
@@ -117,23 +78,27 @@ export function floraHit(x, y, dmg, r = 0.3) {
     if (p.gone || p.fall > 0 || Math.abs(x - p.x) > 3) continue;
     const top = p.anchor > 0 ? p.top : p.y - (p.H || 0.5), y0 = Math.min(p.y, top), y1 = Math.max(p.y, top);
     if (y < y0 - r || y > y1 + r || Math.abs(x - p.x) > p.hw + r + (p.type === 'tree' ? 0.25 : 0)) continue;
-    p.hp -= dmg; hit = true; p.shake = 0.3; if (p.hp <= 0) { if (p.type === 'tree') { p.fall = 0.01; p.dir = x < p.x ? 1 : -1; } else kill(p, true); }
+    p.hp -= dmg; hit = true; p.shake = 0.3; p.bv += (p.x - x > 0 ? 1 : -1) * 3; if (p.hp <= 0) { if (p.type === 'tree') { p.fall = 0.01; p.dir = x < p.x ? 1 : -1; S.shakeBy && S.shakeBy(0.12); } else kill(p, true); }
   }
   return hit;
 }
+// a pressure wave (the laser's impact, a landing, a falling tree): plants lean away from it
+export function floraBlast(x, y, r, k) { for (const p of active) { const dx = p.x - x, dy = p.y - y; if (Math.abs(dx) < r && Math.abs(dy) < r + p.H) p.bv += (dx >= 0 ? 1 : -1) * k * (1 - Math.abs(dx) / r) / (1 + p.H * 0.25); } }
+let lastT = 0;
 export function drawFlora(b, time, front) {
-  const cam = S.cam, hw = 14 / S.zoom + 9, gust = 0.6 + 0.8 * noise2(time * 0.13, cam.x * 0.02, 5);
+  const cam = S.cam, hw = 14 / S.zoom + 9, dt = front ? 0 : clamp(time - lastT, 0, 0.05); if (!front) lastT = time;
   for (const p of active) {
-    if (p.gone || p.front !== front || Math.abs(p.x - cam.x) > hw) continue;
-    const s = Math.sin(time * 1.1 + p.ph + p.x * 0.21) * gust + Math.sin(time * 2.7 + p.ph * 2) * 0.25 + (p.shake > 0 ? Math.sin(time * 40) * p.shake : 0), P = p.prims; if (p.shake > 0) p.shake -= 0.016;
-    let ca = 1, sa = 0; if (p.fall > 0) { const a = Math.min(1.5, p.fall) * (p.dir || 1); ca = Math.cos(a); sa = Math.sin(a); }
-    for (let i = 0; i < P.length; i++) {
-      const q = P[i]; let x1 = q[1] + q[12] * s, y1 = q[2], col = [q[6], q[7], q[8]];
-      if (p.fall > 0) { const dx = x1 - p.x, dy = y1 - p.y; x1 = p.x + dx * ca + dy * sa; y1 = p.y - dx * sa + dy * ca; }
-      if (q[0] === 0) { let x2 = q[3] + q[13] * s, y2 = q[4]; if (p.fall > 0) { const dx = x2 - p.x, dy = y2 - p.y; x2 = p.x + dx * ca + dy * sa; y2 = p.y - dx * sa + dy * ca; } b.seg(x1, y1, x2, y2, q[5], col, q[9], q[10], q[11], i); }
-      else b.add(x1, y1, q[3], q[4], q[5] + (p.fall > 0 ? -Math.min(1.5, p.fall) * (p.dir || 1) : 0), col, q[9] * (q[11] === 2 ? 0.8 + 0.2 * Math.sin(time * 0.9 + p.ph) : 1), q[10], q[11], i + p.ph);
+    if (p.gone || Math.abs(p.x - cam.x) > hw) continue;
+    if (dt) {     // the spring: wind pulls, the stem pulls back, pushers shove
+      const tree = p.type === 'tree', k = tree ? 5 : 16, w = wind(p.x, time) * (tree ? 1 : 1.25) + Math.sin(time * 2.3 + p.ph) * 0.12;
+      p.bv += ((w - p.b) * k - p.bv * (tree ? 1.6 : 3.4)) * dt;
+      if (!tree) for (const q of flora.pushers) { const dx = p.x - q.x; if (Math.abs(dx) < q.r + p.hw && (p.anchor > 0 ? q.y < p.top + 0.3 && q.y + q.h > p.y - 0.2 : q.y + q.h > p.y - p.H && q.y < p.y)) p.bv += ((dx >= 0 ? 1 : -1) * (3 + Math.abs(q.vx) * 1.6) + q.vx * 1.2) * dt * 14; }
+      p.b = clamp(p.b + p.bv * dt, -4, 4); if (p.shake > 0) p.shake -= dt;
     }
-    if (!front || p.type !== 'grass') { const L = p.lights, k = p.fall > 0 ? 0.3 : 0.85 + 0.15 * Math.sin(time * 0.9 + p.ph); for (let i = 0; i < L.length; i += 5) light.emit(L[i] / TS, L[i + 1] / TS, L[i + 2] * k, L[i + 3] * k, L[i + 4] * k); }
+    if (p.front !== front) continue;
+    const s = p.b + (p.shake > 0 ? Math.sin(time * 40) * p.shake : 0);
+    drawPlant(b, p.gen, p.x, p.y, 1, s, time, p.ph, null, p.fall > 0 ? Math.min(1.5, p.fall) * (p.dir || 1) : 0);
+    if (!front || p.type !== 'grass') { const L = p.gen.lights, k = p.fall > 0 ? 0.3 : 0.85 + 0.15 * Math.sin(time * 0.9 + p.ph); for (let i = 0; i < L.length; i += 5) light.emit((p.x + L[i]) / TS, (p.y + L[i + 1]) / TS, L[i + 2] * k, L[i + 3] * k, L[i + 4] * k); }
   }
 }
 export function resetFlora() { blocks.clear(); active = []; }

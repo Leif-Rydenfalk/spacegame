@@ -170,3 +170,6 @@ The other mechanics in this file wait for round 4+.
 - Now: round 2 build (Fable 5.2, code) and DESIGN.md (Fable 5.2, notes only) run in parallel.
 - The moment round 2 lands: verify (build, check, shots), commit + push (Pages redeploys), move these notes into repo:spacegame/docs/, then START ROUND 3 BUILD at once: the visual/feel vertical slice + the core mechanics that need no design decisions (physical material and carrying, carried reactor + ship laser, power network with antenna, demand/supply stock targets with the suit printer, robots hauling, wary/predator ecology, organic movement, layered living forest). Do not wait for DESIGN.md review for these.
 - Mechanics that depend on DESIGN.md answers (diplomacy, Earth, campaign clock, endings, interstellar logistics) wait for Leif's review of DESIGN.md.
+
+19. "yes go. same engine. same system and same repo. but yes. the visual demo is the actual look of the final game. the whole game will be this visually polished and procedurally beutiful."
+-> The round 3 slice sets the visual standard for the whole game; every later system (space, factories, combat, UI) must reach the same polish. Same engine, same repo (repo:spacegame).

@@ -1331,6 +1331,8 @@ What the game teaches about ce-net, in the order a player meets it:
 
 ## 9. Open questions for Leif
 
+> **Leif answered Q2 (2026-11-14):** "its a its a whole planet. this is why i told you no grid becaue the camera msut rotate bsed on gravity.  the hive is on the other side of the planet." The surface is a full round planet with radial gravity and a camera that rotates with it, not a strip. Round 4 builds it (ROUND4.md).
+
 Each has a default that this document already assumes. Silence means the default stands.
 
 | # | Question | Default |

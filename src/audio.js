@@ -6,7 +6,7 @@ function boot() {
   ac = new AC(); master = ac.createGain(); master.gain.value = 0.5; master.connect(ac.destination);
   noise = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate); const d = noise.getChannelData(0); let b = 0;
   for (let i = 0; i < d.length; i++) { const w = Math.random() * 2 - 1; b = (b + 0.02 * w) / 1.02; d[i] = i % 2 ? w * 0.6 : b * 3.2; }
-  for (const [n, f, q] of [['wind', 320, 0.6], ['engine', 70, 0.8], ['drill', 900, 3], ['rcs', 2400, 0.7]]) {
+  for (const [n, f, q] of [['wind', 320, 0.6], ['engine', 70, 0.8], ['drill', 900, 3], ['rcs', 2400, 0.7], ['hum', 55, 4]]) {
     const s = ac.createBufferSource(); s.buffer = noise; s.loop = true; const fl = ac.createBiquadFilter(); fl.type = n === 'drill' ? 'bandpass' : 'lowpass'; fl.frequency.value = f; fl.Q.value = q;
     const g = ac.createGain(); g.gain.value = 0; s.connect(fl); fl.connect(g); g.connect(master); s.start(); loops[n] = { g, fl };
   }

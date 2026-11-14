@@ -10,7 +10,7 @@ export const ITEMS = {
   part: { u: 'ea', m: 30, cap: 8, c: [0.55, 0.6, 0.64] }, 'xeno core': { u: 'ea', m: 3, cap: 4, c: [0.6, 0.8, 1] },
   'rifle rounds': { u: 'rd', m: 0.012, cap: 600, c: [0.6, 0.42, 0.14] }, shells: { u: 'rd', m: 0.045, cap: 120, c: [0.5, 0.15, 0.1] },
   'o2 cell': { u: 'ea', m: 1.4, cap: 6, c: [0.5, 0.7, 0.8] }, 'power cell': { u: 'ea', m: 2.2, cap: 6, c: [1, 0.6, 0.1] },
-  'laser drill': { u: 'ea', m: 7, cap: 1, tool: 1 }, rifle: { u: 'ea', m: 4.1, cap: 1, weapon: 1 }, shotgun: { u: 'ea', m: 3.6, cap: 1, weapon: 1 },
+  'laser drill': { u: 'ea', m: 7, cap: 1, tool: 1 }, antenna: { u: 'ea', m: 18, cap: 2, build: 1 }, rifle: { u: 'ea', m: 4.1, cap: 1, weapon: 1 }, shotgun: { u: 'ea', m: 3.6, cap: 1, weapon: 1 },
   furnace: { u: 'ea', m: 70, cap: 2, build: 1 }, miner: { u: 'ea', m: 45, cap: 2, build: 1 }, belt: { u: 'ea', m: 3, cap: 40, build: 1 }, assembler: { u: 'ea', m: 80, cap: 2, build: 1 },
   chest: { u: 'ea', m: 12, cap: 4, build: 1 }, pad: { u: 'ea', m: 120, cap: 1, build: 1 }, 'bio-printer': { u: 'ea', m: 90, cap: 1, build: 1 }, hub: { u: 'ea', m: 55, cap: 2, build: 1 }, drone: { u: 'ea', m: 8, cap: 8 },
 };
@@ -63,6 +63,7 @@ export const RECIPES = [
   { id: 'assembler', out: { assembler: 1 }, in: { iron: 22, copper: 6 }, t: 9, by: 'assembler' },
   { id: 'hub', out: { hub: 1 }, in: { iron: 18, copper: 8, lumen: 2 }, t: 9, by: 'assembler' },
   { id: 'drone', out: { drone: 1 }, in: { iron: 5, copper: 3, lumen: 0.5 }, t: 6, by: 'assembler' },
+  { id: 'antenna', out: { antenna: 1 }, in: { iron: 8, copper: 4 }, t: 5, by: 'assembler' },
   { id: 'bio-printer', out: { 'bio-printer': 1 }, in: { iron: 25, copper: 12, lumen: 8, biomass: 10 }, t: 15, by: 'assembler' },
   { id: 'pad', out: { pad: 1 }, in: { iron: 40 }, t: 12, by: 'assembler' },
   { id: 'rifle', out: { rifle: 1 }, in: { iron: 4, copper: 0.5 }, t: 8, by: 'assembler' },
@@ -79,6 +80,6 @@ export function printerCancel(pr, I, i) { const j = pr.q[i]; if (!j) return; pr.
 export function printerStep(pr, I, dt, bat, limit = Infinity) {
   const j = pr.q[0]; if (!j) return null; const wh = PRINT_W * dt / 3600; if (bat.wh < wh) { pr.stall = 'no power'; return null; }
   pr.stall = ''; bat.wh -= wh; j.left -= dt; if (j.left > 0) return null;
-  const r = RECIPE[j.r]; for (const k in r.out) if (inv.add(I, k, r.out[k], limit) > 0) { /* overflow is dropped at the feet by the caller */ }
+  const r = RECIPE[j.r]; pr.over = null; for (const k in r.out) { const left = inv.add(I, k, r.out[k], limit); if (left > 0) (pr.over || (pr.over = {}))[k] = left; }      // what does not fit is handed to the caller, who drops it at the feet
   pr.q.shift(); return j.r;
 }

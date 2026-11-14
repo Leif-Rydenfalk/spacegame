@@ -10,7 +10,14 @@ import { G } from './core.js';
 import { S } from './surface/state.js';
 import { P, stepPlayer, fire, WEAPON } from './surface/player.js';
 import { ITEMS, makeInv, inv, printerQueue, printerStep, printerCancel, RECIPE, SUIT_SLOW, PRINT_W } from './items.js';
-import { assignJobs } from './surface/robots.js';
+import { assignJobs, robots, stepRobots, wakeShipRobots, ROBOT } from './surface/robots.js';
+import { matter } from './surface/matter.js';
+import { heat } from './surface/heat.js';
+import { K, SHIP, fireBeam, flushPend, stepKit, kitReset } from './surface/kit.js';
+import { powerBudget, linked, mobility, REACTOR_W, LASER_W, SUIT_BUS_W, CHARGE_W, MIN_FRAC, REACTOR_KG, LASER_KG } from './surface/power.js';
+import { planDemand, bestProducer, stepSupply, SUP, TARGETS0 } from './surface/supply.js';
+import { KIND, stance, PLAYER_SIZE } from './surface/creatures.js';
+import { GRAV } from './surface/gen.js';
 import { place, stepFactory, F } from './surface/factory.js';
 import { addGhost } from './surface/blueprint.js';
 import { save, memAdapter } from './save.js';
@@ -91,13 +98,60 @@ export async function runTests() {
   { const a = genRuin('t', 500, 42), b = genRuin('t', 500, 42), caps = a.stamps.filter(q => q.op > 0 && q.t === 'c' && q.r1 !== undefined);
     ok('ruins grammar', JSON.stringify(a.stamps) === JSON.stringify(b.stamps) && caps.length >= 4 && caps.every(q => q.r1 <= q.r && q.y1 > q.y0) && a.props.some(q => q.t === 'xterm') && a.props.some(q => q.t === 'cache')); }
   // 17 save round-trip: collect -> store -> wreck the state -> load -> collect gives the identical state hash
-  { save.apply({ version: 2, data: d0 }); world.dig(30, -3, 1.4, 0); world.fill(31, 2, 0.6, M.PLATE, 0); S.add('iron', 37.25); S.add('rifle rounds', 77); S.add('furnace', 1); P.x = 12.5; P.y = 3.25; P.bat.wh = 321.5; P.mag.rifle = 11;
+  { save.apply({ version: 3, data: d0 }); matter.spawn('basalt', 12.5, 20, 3); K.reactor.state = 'ground'; K.reactor.x = 7; K.reactor.y = 0.5; K.laser.state = 'turret'; K.laser.x = 9; inv.add(K.hold, 'iron', 3.5); SUP.targets.iron = 44; world.dig(30, -3, 1.4, 0); world.fill(31, 2, 0.6, M.PLATE, 0); S.add('iron', 37.25); S.add('rifle rounds', 77); S.add('furnace', 1); P.x = 12.5; P.y = 3.25; P.bat.wh = 321.5; P.mag.rifle = 11;
     const ch = place('chest', 40, 6, 1, true); inv.add(ch.inv, 'copper', 12.5); const fu = place('furnace', 44, 6, 1, true); fu.inp['iron ore'] = 7.5; fu.out.iron = 1.25; addGhost('assembler', 50, 6); S.printer.q.push({ r: 'belt', left: 9.5, total: 16 }); env.pollute(10, 0, 12.5); S.stats.kills.scout = 3;
     const mem = memAdapter(), keep = save.adapter; save.use(mem); const b1 = save.blob(); await mem.save('t', b1);
-    world.dig(30, -3, 3, 0); S.inv.slots.fill(null); F.machines.length = 0; P.x = -99; env.load(null);
+    world.dig(30, -3, 3, 0); S.inv.slots.fill(null); F.machines.length = 0; P.x = -99; env.load(null); matter.list.length = 0; kitReset('carried'); SUP.targets.iron = 1;
     const b2 = await save.read('t'); save.apply(b2); const h2 = save.hash(save.collect()); save.use(keep);
-    ok('save round-trip', b1.hash === h2 && b2.hash === b1.hash && Object.keys(b1.data.parts.surface.terrain).length > 0 && S.count('iron') === 37.25 && F.machines.length === 2, `${b1.hash} ${h2}`); }
-  save.apply({ version: 2, data: d0 });
+    ok('save round-trip', b1.hash === h2 && b2.hash === b1.hash && Object.keys(b1.data.parts.surface.terrain).length > 0 && S.count('iron') === 37.25 && F.machines.length === 2 && Math.abs(matter.total() - 12.5) < 1e-6 && K.reactor.state === 'ground' && K.laser.state === 'turret' && inv.count(K.hold, 'iron') === 3.5 && SUP.targets.iron === 44, `${b1.hash} ${h2}`);
+    // a round 2 save (version 2: a laser drill item, no kit) loads: the kit is on the body, the drill item is gone
+    const old = JSON.parse(JSON.stringify(b1)); old.version = 2; const so = old.data.parts.surface; delete so.kit; delete so.matter; delete so.supply; so.inv[30] = ['laser drill', 1]; so.p.heat = 0.25; save.apply(old);
+    ok('save migration 2 to 3', K.reactor.state === 'carried' && K.laser.state === 'held' && S.count('laser drill') === 0 && matter.list.length === 0 && S.count('iron') === 37.25 && SUP.targets.iron === TARGETS0.iron); }
+  // 18 mass is conserved when the laser digs and when a robot hauls: every kilogram the beam takes out of the field is
+  //    loose rock, rock still falling out of the cut, or vapour; a chunk carried to the hold arrives whole
+  { save.apply({ version: 3, data: d0 }); S.crash = true; kitReset('carried'); matter.list.length = 0; const x = 80, y = -20, box = [x - 6, y - 6, x + 6, y + 6]; world.box(x - 5, y - 5, x + 5, y + 5, 1, M.BASALT); world.box(x - 5, y - 0.5, x + 5, y + 5, -1); world.box(x + 1, y - 4, x + 3, y - 0.6, -1); world.box(x + 1, y - 4, x + 3, y - 0.6, 1, M.IRON);
+    const m0 = world.mass(...box), dug0 = S.stats.dug, vap0 = S.stats.vapor; let sum0 = 0; for (const k in m0) sum0 += m0[k];
+    for (let i = 0; i < 240; i++) fireBeam(x - 2 + i * 0.012, y + 2, -Math.PI / 2 + 0.3, 1 / 120, 1, false);
+    const m1 = world.mass(...box); let sum1 = 0; for (const k in m1) sum1 += m1[k]; let pend = 0; for (const k in K.pend) pend += K.pend[k];
+    const dug = S.stats.dug - dug0, vap = S.stats.vapor - vap0, loose = matter.total(); flushPend(x, y + 1);
+    ok('digging conserves mass', dug > 200 && Math.abs(sum0 - sum1 - dug) < 1e-6 && Math.abs(dug - vap - loose - pend) < 1e-6 && Math.abs(matter.total() - loose - pend) < 1e-9 && matter.total('iron ore') > 1, `dug ${dug.toFixed(2)} = vapour ${vap.toFixed(2)} + loose ${loose.toFixed(2)} + in the cut ${pend.toFixed(2)}`);
+    const weak = matter.total(), d1 = S.stats.dug; fireBeam(x, y + 2, -Math.PI / 2, 1 / 120, SUIT_BUS_W / LASER_W, false); ok('a starved laser cuts nothing', S.stats.dug === d1 && matter.total() === weak && K.laser.beam.weak === true);
+    // hauling: one ship robot, the network up, 23.7 kg of ore on the ground 9 m from the hold
+    matter.list.length = 0; robots.length = 0; world.box(-16, 0, 16, 9, -1); world.box(-16, -2, 16, 0, 1, M.BASALT); place('antenna', 4, 0, 1, true); K.awake = false; wakeShipRobots(1); P.x = 30; P.y = 0.1; P.dead = 0; SUP.on = true; SUP.orders = []; K.hold.slots.fill(null);
+    const ore = matter.spawn('iron ore', 23.7, -2.5, 0.4); ore.asleep = true; stepKit(1 / 60); let worst = 0, steps = 0;
+    while (inv.count(K.hold, 'iron ore') < 23.7 - 1e-6 && steps++ < 60 * 90) { stepRobots(1 / 60); matter.step(1 / 60); worst = Math.max(worst, Math.abs(matter.total('iron ore') + inv.count(robots[0].cargo, 'iron ore') + inv.count(K.hold, 'iron ore') - 23.7)); }
+    ok('hauling conserves mass', Math.abs(inv.count(K.hold, 'iron ore') - 23.7) < 1e-6 && worst < 1e-6 && matter.total('iron ore') < 1e-9 && inv.mass(robots[0].cargo) < 1e-9, `hold ${inv.count(K.hold, 'iron ore')} after ${(steps / 60).toFixed(1)} s, worst drift ${worst.toExponential(1)}`);
+    robots.length = 0; }
+  // 19 power budget with and without the reactor; the load on the body; the reach of the network
+  { const src = [{ id: 'reactor', w: REACTOR_W }, { id: 'suit', w: SUIT_BUS_W }], withR = powerBudget(src, [{ id: 'laser', w: LASER_W, from: ['reactor', 'suit'] }, { id: 'charge', w: CHARGE_W, from: ['reactor'] }]), noR = powerBudget(src, [{ id: 'laser', w: LASER_W, from: ['', 'suit'] }]), two = powerBudget(src, [{ id: 'a', w: LASER_W, from: ['reactor'] }, { id: 'b', w: LASER_W, from: ['reactor'] }]);
+    ok('power with the reactor', withR.served.laser === 1 && withR.served.charge === 1 && withR.used === LASER_W + CHARGE_W && withR.left.reactor === REACTOR_W - LASER_W - CHARGE_W);
+    ok('power without the reactor', Math.abs(noR.served.laser - SUIT_BUS_W / LASER_W) < 1e-12 && noR.served.laser < MIN_FRAC && noR.left.reactor === REACTOR_W && noR.used === SUIT_BUS_W);
+    ok('power is not created', two.served.a === 1 && Math.abs(two.served.b - (REACTOR_W - LASER_W) / LASER_W) < 1e-12 && two.used === REACTOR_W);
+    // the same through the running kit: laser in hand, reactor still in the wreck 40 m away, then on the back
+    S.crash = true; kitReset('carried'); K.reactor.state = 'ship'; P.x = SHIP.bay[0] + 40; P.y = 0.1; P.gx = P.x; P.gy = 1.3; P.wa = -1.2; P.dead = 0; P.act = null; P.bat.wh = 300; P.wantFire = true; const d0b = S.stats.dug; for (let i = 0; i < 30; i++) { P.wantFire = true; stepKit(1 / 120); } const f0 = K.laser.frac, dugNo = S.stats.dug - d0b;
+    K.reactor.state = 'carried'; world.box(P.x - 3, -3, P.x + 3, 0, 1, M.BASALT); for (let i = 0; i < 30; i++) { P.wantFire = true; stepKit(1 / 120); } const f1 = K.laser.frac; P.wantFire = false; stepKit(1 / 120);
+    ok('laser needs the reactor', f0 < MIN_FRAC && dugNo === 0 && f1 === 1 && S.stats.dug - d0b > 1, `frac ${f0.toFixed(3)} then ${f1}, dug ${(S.stats.dug - d0b).toFixed(1)} kg`);
+    const free = mobility(0), heavy = mobility(REACTOR_KG + LASER_KG); ok('the reactor is a burden', free.jet > GRAV && heavy.jet < GRAV && heavy.speed < free.speed * 0.8 && heavy.jump < free.jump * 0.7 && heavy.acc < free.acc, `jet ${heavy.jet.toFixed(1)} of ${GRAV} m/s2, pace ${(heavy.speed / free.speed * 100).toFixed(0)}%`);
+    const ant = [{ x: 0, y: 4, range: 70 }], wall = () => true; ok('network range', !!linked(60, 0, ant) && !linked(80, 0, ant) && !linked(60, 0, ant, wall) && !!linked(30, 0, ant, wall) && !linked(5, 0, [])); }
+  // 20 stock targets: demand goes to the best producer that stands: the arm first, the furnace once there is one
+  { const none = new Set(), fur = new Set(['furnace']), a = planDemand({ iron: 10 }, { iron: 30 }, {}, none), b = planDemand({ iron: 10 }, { iron: 30 }, {}, fur), c = planDemand({ iron: 10 }, { iron: 30 }, { iron: 12 }, fur), d = planDemand({ iron: 30, 'power cell': 1 }, { iron: 30, 'power cell': 2 }, {}, fur);
+    ok('demand picks the arm first', a.length === 1 && a[0].producer === 'suit' && a[0].batches === 20 && Math.abs(a[0].inputs['iron ore'] - 32) < 1e-9 && bestProducer(RECIPE.iron, none) === 'suit');
+    ok('demand picks the machine once built', b[0].producer === 'furnace' && c[0].batches === 8 && d.length === 1 && d[0].item === 'power cell' && d[0].producer === 'suit' && planDemand({ iron: 30 }, { iron: 30 }, {}, fur).length === 0 && bestProducer(RECIPE['power cell'], new Set(['assembler'])) === 'assembler');
+    // through the running AI: ore in the suit and a link: the arm gets the job; a furnace stands: the furnace gets it
+    save.apply({ version: 3, data: d0 }); S.crash = true; kitReset('carried'); F.machines.length = 0; F.cells.clear(); matter.list.length = 0; robots.length = 0; S.inv.slots.fill(null); S.printer.q.length = 0; K.hold.slots.fill(null); P.x = SHIP.x + 3; P.y = 0.1; P.dead = 0; SUP.on = true; SUP.targets = { iron: 30 }; inv.add(S.inv, 'iron ore', 20);
+    stepKit(1 / 60); SUP.tick = 0; stepSupply(1); const q1 = S.printer.q.map(j => j.r).join(), o1 = SUP.orders[0] && SUP.orders[0].producer;
+    S.printer.q.length = 0; const fu = place('furnace', -30, 0, 1, true); SUP.tick = 0; stepSupply(1); const o2 = SUP.orders[0];
+    ok('the AI queues the right producer', q1 === 'iron' && o1 === 'suit' && o2.producer === 'furnace' && o2.machine === fu && S.printer.q.length === 0, `${q1} ${o1} then ${o2 && o2.producer}`); SUP.targets = { ...TARGETS0 }; }
+  // 21 wary or predator: nothing is hostile by default; what is bigger than you and eats meat hunts you
+  { const far = { dist: 40, hurt: false, cornered: false, noise: 0, order: null, hp: 1 }, at = (d, o) => ({ ...far, dist: d, ...o }), st = KIND.strider, sk = KIND.stalker, sc = KIND.scout;
+    ok('the herd is wary', stance(st, far) === 'ignore' && stance(st, at(12)) === 'watch' && stance(st, at(6)) === 'flee' && stance(st, at(30, { noise: 20 })) === 'flee' && stance(st, at(1.5, { hurt: true })) === 'defend' && stance(st, at(9, { hurt: true })) === 'flee' && stance(st, at(1.5, { cornered: true })) === 'defend' && stance(KIND.calf, at(1, { hurt: true })) === 'flee');
+    ok('the predator hunts', sk.size > PLAYER_SIZE && stance(sk, far) === 'hunt' && stance(sk, at(3)) === 'hunt' && stance(sk, at(3, { hp: 0.2 })) === 'flee' && stance(KIND.grazer, at(3)) !== 'hunt');
+    ok('the hive answers, it does not start', stance(sc, at(10)) === 'watch' && stance(sc, at(3)) === 'flee' && stance(sc, at(10, { order: 'probe' })) === 'probe' && stance(sc, at(10, { order: 'attack' })) === 'attack' && stance(sc, at(10, { hurt: true })) === 'attack');
+    let only = true; for (const k in KIND) { const q = KIND[k], s0 = stance(q, at(4)); if ((s0 === 'hunt') !== (q.diet === 'prey' && q.size > PLAYER_SIZE) || s0 === 'attack') only = false; } ok('only a larger meat eater hunts unprovoked', only); }
+  // 22 heat: what the laser leaves cools, spreads, and never grows
+  { heat.clear(); heat.add(100, 5, 0.8, 1.5); const t0 = heat.total(), n0 = heat.cells.size; let mono = true, prev = t0, grew = false; for (let i = 0; i < 90; i++) { heat.step(1 / 30 + 1e-9); const t = heat.total(); if (t > prev + 1e-9) mono = false; prev = t; if (i === 5) grew = heat.cells.size > n0; }
+    ok('heat cools and spreads', t0 > 5 && mono && prev < t0 * 0.75 && prev > 0 && heat.at(100, 5) > 0 && heat.at(100, 5) < 1.5 && grew, `${t0.toFixed(1)} -> ${prev.toFixed(1)}`); heat.clear(); }
+  save.apply({ version: 3, data: d0 }); S.crash = undefined;
   const msg = fails.length ? `tests FAIL ${fails.length}/${n}: ${fails.join('; ')}` : `tests ok ${n}`;
   console.log(msg); window.__tests = msg;
   const d = document.createElement('div'); d.style.cssText = 'position:fixed;left:24px;bottom:184px;font:11px ui-monospace,monospace;color:#9fb3bf;letter-spacing:.08em;text-transform:uppercase'; d.textContent = msg; document.body.appendChild(d);

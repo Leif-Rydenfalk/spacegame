@@ -12,7 +12,7 @@ export const STORY = {
   },
   // names shown in the HUD when the player stands in a site, and the species names
   sites: { ruin: P + 'ruin site', hive: P + 'hive', base: P + 'military outpost, under lockdown', lab: P + 'research facility, under lockdown' },
-  species: { scout: P + 'scout', swarmer: P + 'swarmer', brute: P + 'brute', spitter: P + 'spitter', burrower: P + 'burrower', flier: P + 'flier', grazer: P + 'grazer (native)', jelly: P + 'spore jelly (native)' },
+  species: { scout: P + 'scout', swarmer: P + 'swarmer', brute: P + 'brute', spitter: P + 'spitter', burrower: P + 'burrower', flier: P + 'flier', grazer: P + 'grazer (native)', jelly: P + 'spore jelly (native)', strider: P + 'strider (native, herds)', calf: P + 'strider calf', stalker: P + 'stalker (native predator)' },
   // one quiet line at the bottom of the screen when the trigger event first fires (once: false = every time)
   beats: [
     { id: 'landed', trigger: 'landed', text: P + 'Transport down. One prisoner awake. Research station does not answer.', once: true },
@@ -44,6 +44,16 @@ export const STORY = {
     { id: 'seenSpitter', trigger: 'seen:spitter', text: P + 'It keeps its distance. The acid eats rock.', once: true },
     { id: 'seenFlier', trigger: 'seen:flier', text: P + 'They have wings too.', once: true },
     { id: 'seenSwarmer', trigger: 'seen:swarmer', text: P + 'Small ones. Never one.', once: true },
+    { id: 'laserTaken', trigger: 'laserTaken', text: P + 'The ship\'s gun, off its mount. It was never meant for hands.', once: true },
+    { id: 'reactorPulled', trigger: 'reactorPulled', text: P + 'The reactor comes out of the dead ship. A hundred and forty kilos of the only power on this world.', once: true },
+    { id: 'turretDeployed', trigger: 'turretDeployed', text: P + 'On its legs it needs no hands. It needs a computer, and a link.', once: true },
+    { id: 'robotsAwake', trigger: 'robotsAwake', text: P + 'The ship is dead. Its mind is not. Its robots wake.', once: true },
+    { id: 'robotFed', trigger: 'robotFed', text: P + 'I did not ask for that ore to be moved. It was needed, so it moved.', once: true },
+    { id: 'aiQueued', trigger: 'aiQueued', text: P + 'The ship keeps count of what I use, and starts making more before I ask.', once: true },
+    { id: 'seenStrider', trigger: 'seen:strider', text: P + 'A herd. They watch. They are deciding how far away I should be.', once: true },
+    { id: 'seenStalker', trigger: 'seen:stalker', text: P + 'That one is not afraid of me. That one is bigger than me.', once: true },
+    { id: 'hiveProbe', trigger: 'hiveProbe', text: P + 'Something under the ground heard the cutting.', once: true },
+    { id: 'hiveKnows', trigger: 'hiveKnows', text: P + 'The scout went home. Now the hive knows where I am.', once: true },
     { id: 'launch', trigger: 'launch', text: P + 'Leaving the ground they sent us to.', once: true },
     { id: 'orbit', trigger: 'orbit', text: P + 'Orbit. Nobody on Earth knows this ship exists.', once: true },
     { id: 'firstAsteroid', trigger: 'firstAsteroid', text: P + 'First rock cut. The belt is the real research.', once: true },

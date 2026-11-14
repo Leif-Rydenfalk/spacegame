@@ -45,7 +45,7 @@ export const ui = { open: false,
     root.addEventListener('contextmenu', e => e.preventDefault());
     addEventListener('mousemove', e => { mx = e.clientX; my = e.clientY; const t = e.target.closest && e.target.closest('[data-tip]'); if (t) { tip.textContent = t.dataset.tip; tip.style.display = 'block'; tip.style.left = Math.min(innerWidth - 440, mx + 16) + 'px'; tip.style.top = (my + 18) + 'px'; } else tip.style.display = 'none'; heldEl.style.left = (mx - 26) + 'px'; heldEl.style.top = (my - 26) + 'px'; });
   },
-  toggle(force) { this.open = force === undefined ? !this.open : force; if (!this.open) { if (held) { const left = inv.add(S.inv, held.id, held.n); if (left > EPS) S.say(held.id + ' dropped'); held = null; } S.open = null; } S.uiOpen = this.open; sig = ''; },
+  toggle(force) { this.open = force === undefined ? !this.open : force; if (!this.open) { if (held) { const left = inv.add(S.inv, held.id, held.n); if (left > EPS) { S.drop(held.id, left); S.say(held.id + ' dropped at your feet'); } held = null; } S.open = null; } S.uiOpen = this.open; sig = ''; },
   openMachine(m) { S.open = m; this.toggle(true); },
   // called every frame while Act 1 is on screen
   update(visible) {
@@ -73,7 +73,7 @@ export const ui = { open: false,
     h += `<div class="pan"><h4>suit inventory<b>${inv.mass(S.inv).toFixed(0)} / ${CARRY} kg</b></h4>${grid(S.inv, 'p', 9, 9)}<div class="sep"></div>${grid(S.inv, 'p', 9, 0, 9)}<div class="sep"></div>
       <div class="row"><span>battery</span><b>${P.bat.wh.toFixed(0)} / ${P.bat.cap} Wh</b></div><div class="row"><span>oxygen</span><b>${P.o2.toFixed(2)} kg</b></div><div class="row"><span>jet propellant</span><b>${P.prop.toFixed(1)} kg</b></div>
       <div class="row" style="margin-top:6px;color:rgba(159,179,191,.35)"><span>lmb move &nbsp; rmb split / place one &nbsp; shift quick move</span></div></div>`;
-    h += `<div class="pan"><h4>suit printer<b>${q.length ? (S.printer.stall || 'printing') : 'idle'}</b></h4><div class="grid g6">` + RECIPES.map(r => { const ok = S.has(r.in), out = Object.keys(r.out)[0]; return `<div class="slot ${ok ? '' : 'dim'}" data-a="print" data-i="${r.id}" data-tip="${recipeTip(r)}" style="background-image:url(${iconUrl(out)})"></div>`; }).join('') + '</div>'
+    h += `<div class="pan"><h4>the arm: matter compiler<b>${q.length ? (S.printer.stall || 'printing') : 'idle'}</b></h4><div class="grid g6">` + RECIPES.map(r => { const ok = S.has(r.in), out = Object.keys(r.out)[0]; return `<div class="slot ${ok ? '' : 'dim'}" data-a="print" data-i="${r.id}" data-tip="${recipeTip(r)}" style="background-image:url(${iconUrl(out)})"></div>`; }).join('') + '</div>'
       + `<div class="sep"></div><h4>queue<b>${q.length} / 12</b></h4><div class="grid g6" style="min-height:52px">` + q.map((j, i) => `<div class="slot" data-a="unprint" data-i="${i}" data-tip="${j.r}\n${Math.ceil(j.left)} s left\nclick to cancel: the material comes back" style="background-image:url(${iconUrl(Object.keys(RECIPE[j.r].out)[0])})"><span class="pg"><i style="width:${(100 * (1 - j.left / j.total)).toFixed(0)}%"></i></span></div>`).join('') + `</div>
       <div class="row" style="margin-top:6px;color:rgba(159,179,191,.35)"><span>prints anything, ${SUIT_SLOW}x slower than a machine &nbsp; shift x5</span></div></div>`;
     win.innerHTML = h;

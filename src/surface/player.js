@@ -1,31 +1,43 @@
-// player body on the density field, the suit (battery, oxygen, jet propellant, printer), the laser drill, and the
-// weapons of combat mode. Every round, watt-hour and kilogram is counted.
-import { G, input, events, clamp, rand, TAU } from '../core.js';
+// the player: a physics body on the density field (three circles that the field pushes out), and on top of it a body
+// that moves like a person. The legs are not an animation: each foot is planted in the world and steps when the hip
+// has left it behind, onto the ground that is really there; the pelvis hangs as high as the planted legs allow, on a
+// spring; the torso leans into acceleration and against a heavy pack; breath follows exertion; a hard landing or a bad
+// foothold makes it stumble; a hand reaches for what it works on. The weapon is heavy: it swings after the aim, late.
+// Carrying the reactor (140 kg) changes all of it. Suit: battery, oxygen, jet propellant, the arm's matter compiler.
+import { G, input, events, clamp, rand, lerp, angDiff, TAU } from '../core.js';
 import { audio } from '../audio.js';
 import { world, TS, GRAV, M, MAT, surfaceH } from './world.js';
 import { LAVA_Y } from './gen.js';
 import { light } from './light.js';
+import { heat } from './heat.js';
 import { heatAt } from './terrain.js';
 import { S, C, mul } from './state.js';
 import { env } from './env.js';
-import { ITEMS, inv, printerStep, CARRY } from '../items.js';
+import { ITEMS, RECIPE, inv, printerStep, CARRY } from '../items.js';
 import { creatures, hurtCreature, ik2 } from './creatures.js';
-import { floraHit } from './flora.js';
+import { floraHit, floraBlast } from './flora.js';
 import { F } from './factory.js';
+import { matter } from './matter.js';
+import { mobility, REACTOR_KG } from './power.js';
+import { K, kitKg, hasLaser, hasReactor, drawReactor, drawLaser } from './kit.js';
 
-export const SUIT = { bat: 600, o2: 1.2, prop: 2.0, laserW: 4500, lampW: 15, rtgW: 40, o2Rate: 0.0012, jetRate: 0.18 };
+export const SUIT = { bat: 600, o2: 1.2, prop: 2.0, lampW: 15, rtgW: 40, o2Rate: 0.0012, jetRate: 0.18, gather: 28, reach: 1.7 };
 export const WEAPON = {
   rifle: { ammo: 'rifle rounds', mag: 30, cool: 0.105, v0: 820, n: 1, spread: 0.006, dmg: 22, kick: 0.55, rec: 0.016, reload: 1.6, noise: 75, len: 1.05 },
   shotgun: { ammo: 'shells', mag: 6, cool: 0.85, v0: 400, n: 9, spread: 0.07, dmg: 9, kick: 3.2, rec: 0.1, reload: 2.2, noise: 90, len: 0.9 },
 };
-export const P = { x: 0, y: 0, vx: 0, vy: 0, ground: false, face: 1, hp: 100, bat: { wh: SUIT.bat, cap: SUIT.bat }, o2: SUIT.o2, prop: SUIT.prop, slot: 0, walk: 0, aim: 0, mag: { rifle: 30, shotgun: 6 }, reload: 0, cool: 0, dead: 0, shots: 0, flashT: 0, air: 0,
-  hurtT: 0, stepD: 0, heat: 0, vent: 0, beam: null, recoil: 0, bloom: 0, ads: 0, hitT: 0, weapon: 'rifle', charging: false };
-const R = 0.3, CY = [0.3, 0.9, 1.5], nv = [0, 0];
-export function spawnAt(x) { P.x = x; P.y = (world.groundY(x, surfaceH(x) + 6, 0, 30) || surfaceH(x)) + 0.05; P.vx = P.vy = 0; P.hp = 100; P.dead = 0; P.prop = SUIT.prop; P.o2 = SUIT.o2; P.bat.wh = Math.max(P.bat.wh, 200); }
+const foot = () => ({ x: 0, y: 0, t: -1, sx: 0, sy: 0, tx: 0, ty: 0, air: true });
+export const P = { x: 0, y: 0, vx: 0, vy: 0, ground: false, face: 1, hp: 100, bat: { wh: SUIT.bat, cap: SUIT.bat }, o2: SUIT.o2, prop: SUIT.prop, slot: 0, aim: 0, mag: { rifle: 30, shotgun: 6 }, reload: 0, cool: 0, dead: 0, shots: 0, flashT: 0, air: 0,
+  hurtT: 0, recoil: 0, bloom: 0, ads: 0, hitT: 0, weapon: null, charging: false, wa: 0, wv: 0, gx: 0, gy: 1.3, act: null, wantFire: false, exert: 0, stumble: 0, load: 0, reach: null, gatherT: 0,
+  rig: { f: [foot(), foot()], py: 0.88, pv: 0, lean: 0, lv: 0, lvx: 0, ax: 0, breath: 0, sdir: 1, head: 0 } };
+const R = 0.3, CY = [0.3, 0.9, 1.5], nv = [0, 0], HIP0 = 0.88, THIGH = 0.46, SHIN = 0.46;
+export function spawnAt(x) { P.x = x; P.y = (world.groundY(x, surfaceH(x) + 6, 0, 30) || surfaceH(x)) + 0.05; P.vx = P.vy = 0; P.hp = 100; P.dead = 0; P.prop = SUIT.prop; P.o2 = SUIT.o2; P.bat.wh = Math.max(P.bat.wh, 200); P.act = null; P.stumble = 0; for (const f of P.rig.f) f.air = true; }
 export function hurt(d, kx = 0, ky = 0) {
-  if (P.dead) return; P.hp -= d; P.vx += kx; P.vy += ky; S.flash = Math.min(1, S.flash + d / 30); G.shake += d * 0.012; P.hurtT = 0.5; audio.play('hit');
-  if (P.hp <= 0) { P.dead = 3; S.corpse = { x: P.x, y: P.y, inv: inv.dump(S.inv) }; S.inv.slots.fill(null); S.printer.q.length = 0; events.emit('died'); }
+  if (P.dead) return; P.hp -= d; P.vx += kx; P.vy += ky; S.flash = Math.min(1, S.flash + d / 30); G.shake += d * 0.012; P.hurtT = 0.5; audio.play('hit'); if (d > 4) stumble(0.35 + d * 0.01, Math.sign(kx) || -P.face);
+  if (P.dead) return;
+  if (P.hp <= 0) { P.dead = 3; S.corpse = { x: P.x, y: P.y, inv: inv.dump(S.inv) }; S.inv.slots.fill(null); S.printer.q.length = 0; P.act = null; events.emit('died'); }
 }
+function stumble(t, dir) { if (P.stumble > 0.1) return; P.stumble = t; P.rig.sdir = dir || Math.sign(P.vx) || P.face; P.rig.pv -= 1.6; P.rig.lv += P.rig.sdir * 2.2; P.vx *= 0.55; P.exert = Math.min(1, P.exert + 0.2); }
 // push the three body circles out of the field; returns true when the feet rest on walkable ground
 function resolve() {
   let ground = false;
@@ -43,66 +55,68 @@ function resolve() {
   }
   return ground;
 }
-const muzzle = (l = 0.95) => { const sx = P.x, sy = P.y + 1.36; return [sx + Math.cos(P.aim) * l, sy + Math.sin(P.aim) * l]; };
+const gunMuzzle = (l = 0.95) => [P.gx + Math.cos(P.aim) * l, P.gy + Math.sin(P.aim) * l];
 const heldWeapon = () => { const s = S.inv.slots[P.slot]; if (s && ITEMS[s.id].weapon) return s.id; const i = S.inv.slots.findIndex((q, j) => j < 9 && q && ITEMS[q.id].weapon); if (i >= 0) { P.slot = i; return S.inv.slots[i].id; } return null; };
-export function setMode(m) { S.mode = S.mode === m ? 'build' : m; audio.play('click'); if (S.mode === 'combat' && !heldWeapon()) S.say('no weapon in the hotbar'); }
+export function setMode(m) { S.mode = S.mode === m ? 'build' : m; audio.play('click'); if (S.mode === 'combat' && !heldWeapon() && !hasLaser()) S.say('unarmed: the ship laser is the only weapon'); }
+S.drop = (id, n) => matter.spawn(id, n, P.x + P.face * 0.45, P.y + 1.0, P.face * 1.3 + P.vx, 1.2);
 
 export function stepPlayer(dt) {
-  S.flash = Math.max(0, S.flash - dt * 1.5); P.hurtT = Math.max(0, P.hurtT - dt); P.flashT -= dt; P.cool -= dt; P.hitT -= dt; S.msgT -= dt;
+  S.flash = Math.max(0, S.flash - dt * 1.5); P.hurtT = Math.max(0, P.hurtT - dt); P.flashT -= dt; P.cool -= dt; P.hitT -= dt; S.msgT -= dt; P.stumble = Math.max(0, P.stumble - dt);
   for (let i = S.gains.length - 1; i >= 0; i--) if ((S.gains[i].t -= dt) <= 0) S.gains.splice(i, 1);
-  P.beam = null;
-  if (P.dead > 0) { P.dead -= dt; audio.loop('drill', 0); audio.loop('engine', 0); if (P.dead <= 0) { const pr = F.printer; if (pr) { P.x = (pr.x + pr.w / 2) * TS + 1.4; P.y = pr.y * TS + 0.1; P.vx = P.vy = 0; P.hp = 100; P.dead = 0; P.o2 = SUIT.o2; P.prop = SUIT.prop; P.bat.wh = SUIT.bat; } else spawnAt(0); if (!S.count('laser drill')) S.add('laser drill', 1); } return; }
-  const ui = S.uiOpen, combat = S.mode === 'combat', ads = combat && input.down[2] && !ui;
+  P.wantFire = false; P.reach = null;
+  if (P.dead > 0) { P.dead -= dt; audio.loop('engine', 0); if (P.dead <= 0) { const pr = F.printer; if (pr) { P.x = (pr.x + pr.w / 2) * TS + 1.4; P.y = pr.y * TS + 0.1; P.vx = P.vy = 0; P.hp = 100; P.dead = 0; P.o2 = SUIT.o2; P.prop = SUIT.prop; P.bat.wh = SUIT.bat; } else spawnAt(0); if (K.laser.state === 'held' || K.reactor.state === 'carried') { /* the kit stays where the body fell: go and get it */ if (K.reactor.state === 'carried' && S.corpse) { K.reactor.state = 'ground'; K.reactor.x = S.corpse.x; K.reactor.y = S.corpse.y + 0.3; K.reactor.vy = 0; } if (K.laser.state === 'held' && S.corpse) { K.laser.state = 'turret'; K.laser.x = S.corpse.x + 0.8; K.laser.y = S.corpse.y; K.laser.ang = 0.2; } } } return; }
+  const ui = S.uiOpen, busy = !!P.act, combat = S.mode === 'combat', ads = combat && input.down[2] && !ui;
   P.ads += ((ads ? 1 : 0) - P.ads) * Math.min(1, dt * 9);
-  const load = inv.mass(S.inv), enc = 1 - 0.35 * clamp((load - 300) / (CARRY - 300), 0, 1);
-  const ax = ui ? 0 : (input.key('d') ? 1 : 0) - (input.key('a') ? 1 : 0), max = (input.key('Shift') && !ads ? 8.5 : 6.5) * enc * (1 - 0.45 * P.ads), acc = P.ground ? 24 : 6;
+  const load = P.load = inv.mass(S.inv) + kitKg(), mob = P.mob = mobility(load), sprint = input.key('Shift') && !ads;
+  const ax = ui || busy ? 0 : (input.key('d') ? 1 : 0) - (input.key('a') ? 1 : 0), max = (sprint ? mob.sprint : mob.speed) * (1 - 0.45 * P.ads) * (P.stumble > 0 ? 0.4 : 1), acc = P.ground ? mob.acc : 6;
   if (ax) { if (P.vx * ax < max) P.vx = clamp(P.vx + ax * acc * dt, -Math.max(max, Math.abs(P.vx)), Math.max(max, Math.abs(P.vx))); }
-  if (P.ground && (!ax || P.vx * ax < 0 || Math.abs(P.vx) > max)) P.vx -= Math.sign(P.vx) * Math.min(Math.abs(P.vx), 16 * dt);
+  if (P.ground && (!ax || P.vx * ax < 0 || Math.abs(P.vx) > max)) P.vx -= Math.sign(P.vx) * Math.min(Math.abs(P.vx), (16 - 5 * mob.k) * dt);
   P.air = P.ground ? 0 : P.air + dt;
-  const up = !ui && (input.key('w') || input.key(' '));
-  let jumped = false; if (up && P.ground) { P.vy = 4.6; P.ground = false; jumped = true; }
+  const up = !ui && !busy && (input.key('w') || input.key(' '));
+  let jumped = false; if (up && P.ground && P.stumble <= 0) { P.vy = mob.jump; P.ground = false; jumped = true; P.exert = Math.min(1, P.exert + 0.08 + mob.k * 0.15); P.rig.pv += 1.2; }
   let jet = false;
-  if (!ui && input.key(' ') && !P.ground && P.air > 0.22 && P.prop > 0) { jet = true; P.vy += 14 * dt; P.prop = Math.max(0, P.prop - SUIT.jetRate * dt); env.noise(P.x, P.y, 22); }
+  if (!ui && !busy && input.key(' ') && !P.ground && P.air > 0.22 && P.prop > 0) { jet = true; P.vy += mob.jet * dt; P.prop = Math.max(0, P.prop - SUIT.jetRate * dt); env.noise(P.x, P.y, 22); }
   if (P.ground && P.prop < SUIT.prop && P.bat.wh > 1) { const k = Math.min(SUIT.prop - P.prop, 0.45 * dt); P.prop += k; P.bat.wh -= k * 1.5; }      // intake compressor: 1.5 Wh per kg
   if (jet) {
     for (let i = 0; i < 2; i++) S.parts.spawn({ x: P.x - P.face * 0.22, y: P.y + 0.85, vx: P.vx + rand(-1, 1), vy: P.vy - rand(7, 12), life: rand(0.12, 0.3), size: rand(0.08, 0.2), c: [3, 1.6, 0.6], c2: [0.8, 0.1, 0.02], grav: 0 });
-    light.emit(P.x / TS, P.y / TS + 1, 0.9, 0.45, 0.15);
+    light.emit(P.x / TS, P.y / TS + 1, 0.9, 0.45, 0.15); if (Math.random() < dt * 20) floraBlast(P.x, P.y - 1, 2.5, 0.6);
   }
   audio.loop('engine', jet ? 0.35 : 0, 240);
   P.vy -= GRAV * dt; P.vy = Math.max(P.vy, -60);
   const was = P.ground, vy0 = P.vy, n = Math.max(1, Math.ceil(Math.max(Math.abs(P.vx), Math.abs(P.vy)) * dt / 0.1)); let g = false;
   for (let i = 0; i < n; i++) { P.x += P.vx * dt / n; P.y += P.vy * dt / n; g = resolve() || g; }
   if (!g && was && !jumped && P.vy <= 0.5) { const d = world.dist(P.x, P.y + R); if (d < R + 0.2) { world.normal(P.x, P.y + R, nv); if (nv[1] > 0.8) { P.y -= (d - R); P.vy = Math.min(P.vy, 0); g = true; } } }
-  if (g && !was) { const imp = -vy0; if (imp > 3) { audio.play('thud'); dust(P.x, P.y, 4 + imp); env.noise(P.x, P.y, 8 + imp); } if (imp > 11) hurt((imp - 11) * (imp - 11) * 1.8); }
+  if (g && !was) { const imp = -vy0; if (imp > 3) { audio.play('thud'); dust(P.x, P.y, 4 + imp); env.noise(P.x, P.y, 8 + imp + mob.k * 8); P.rig.pv -= imp * (0.45 + mob.k * 0.5); floraBlast(P.x, P.y, 2, imp * 0.5); } if (imp > 5.2 - 1.8 * mob.k) stumble(0.25 + (imp - 4) * 0.05 + mob.k * 0.3); if (imp > 11 - 3 * mob.k) hurt((imp - 11 + 3 * mob.k) * (imp - 11 + 3 * mob.k) * 1.8); }
   P.ground = g;
   if (P.y < LAVA_Y + 0.3 && !world.solidAt(P.x, P.y + 0.5)) hurt(60 * dt);
-  if (P.ground && Math.abs(P.vx) > 0.5) { P.walk += Math.abs(P.vx) * dt * 2.6; P.stepD += Math.abs(P.vx) * dt; if (P.stepD > 1.3) { P.stepD = 0; audio.play('step'); env.noise(P.x, P.y, Math.abs(P.vx) > 7 ? 9 : 5); } }
+  if (g && heat.at(P.x, P.y - 0.1) > 0.75) hurt(22 * dt);                              // molten ground
+  P.exert = clamp(P.exert + dt * ((sprint && ax ? 0.14 : 0) + (ax ? mob.k * 0.1 : 0) - 0.07), 0, 1);
   P.bloom = Math.max(0, P.bloom - dt * 0.09); P.recoil *= Math.exp(-dt * 9);
   P.aim = Math.atan2(S.mouse.y - (P.y + 1.36), S.mouse.x - P.x) + P.recoil * (Math.cos(P.aim) >= 0 ? 1 : -1); P.face = Math.cos(P.aim) >= 0 ? 1 : -1;
-  // suit: oxygen, battery, cells, printer
-  P.o2 = Math.max(0, P.o2 - SUIT.o2Rate * dt); if (P.o2 <= 0) hurt(4 * dt);
+  // suit: oxygen, battery, cells, the arm's matter compiler
+  P.o2 = Math.max(0, P.o2 - SUIT.o2Rate * (1 + P.exert * 0.6) * dt); if (P.o2 <= 0) hurt(4 * dt);
   P.bat.wh = Math.min(P.bat.cap, P.bat.wh + SUIT.rtgW * dt / 3600); if (light.lamp.on) P.bat.wh = Math.max(0, P.bat.wh - SUIT.lampW * dt / 3600);
-  if (P.o2 < 0.12 && inv.take(S.inv, 'o2 cell', 1) > 0) { P.o2 = SUIT.o2; S.say('o2 cell used'); }
-  if (P.bat.wh < 25 && inv.take(S.inv, 'power cell', 1) > 0) { P.bat.wh = Math.min(P.bat.cap, P.bat.wh + 400); S.say('power cell used'); }
+  if (P.o2 < 0.12 && inv.take(S.inv, 'o2 cell', 1) > 0) { P.o2 = SUIT.o2; S.say('o2 cell used'); events.emit('used', 'o2 cell'); }
+  if (P.bat.wh < 25 && inv.take(S.inv, 'power cell', 1) > 0) { P.bat.wh = Math.min(P.bat.cap, P.bat.wh + 400); S.say('power cell used'); events.emit('used', 'power cell'); }
   P.charging = false; for (const m of F.machines) if ((m.kind === 'hub' || m.kind === 'bio-printer') && Math.hypot((m.x + m.w / 2) * TS - P.x, m.y * TS - P.y) < 4) P.charging = true;
-  if (S.crash && Math.hypot(P.x + 9, P.y) < 6) P.charging = true;                                 // the wreck still has a reactor
   if (P.charging) { P.bat.wh = Math.min(P.bat.cap, P.bat.wh + 3000 * dt / 3600 * 20); P.o2 = Math.min(SUIT.o2, P.o2 + 0.05 * dt); }
-  const done = printerStep(S.printer, S.inv, dt, P.bat); if (done) { S.gain(done, 0.0001); audio.play('place'); events.emit('suitPrinted'); if (ITEMS[done].build) events.emit('firstMachinePrinted'); }
+  const done = printerStep(S.printer, S.inv, dt, P.bat, CARRY - inv.mass(S.inv) + 200);
+  if (done) { S.gain(done, 0.0001); audio.play('place'); events.emit('suitPrinted'); if (ITEMS[done].build) events.emit('firstMachinePrinted'); if (S.printer.over) { for (const k in S.printer.over) S.drop(k, S.printer.over[k]); S.printer.over = null; } }
   // hotbar
   if (!ui && S.mode !== 'blueprint') { for (let i = 0; i < 9; i++) if (input.hit(String(i + 1))) P.slot = i; if (input.wheel) P.slot = (P.slot + (input.wheel > 0 ? 1 : 8)) % 9; }
   if (input.hit('f')) light.lamp.on = !light.lamp.on;
   if (input.hit('c') && !ui) setMode('combat');
-  // tools
-  P.heat = Math.max(0, P.heat - dt * (P.vent > 0 ? 0.5 : 0.3)); if (P.vent > 0) { P.vent -= dt; if (Math.random() < dt * 40) { const [mx, my] = muzzle(0.8); S.parts.spawn({ x: mx, y: my, vx: rand(-1, 1), vy: rand(0.5, 2), life: rand(0.5, 1.2), size: rand(0.1, 0.25), grow: 2, c: [0.3, 0.3, 0.32], mode: 1, a: 0.3, grav: -0.05, drag: 1.5 }); } }
-  let drilling = false;
-  if (!ui && S.mode === 'build') {
-    if (input.down[0] && S.count('laser drill') > 0 && P.vent <= 0 && P.bat.wh > 0.5) { laser(dt); drilling = true; }
+  // hands: the laser (kit.js fires it), placing terrain, gathering loose matter, dropping what is held
+  const wn = combat ? heldWeapon() : null; P.weapon = wn;
+  if (!ui && !busy && input.down[0] && hasLaser() && (S.mode === 'build' || (combat && !wn))) P.wantFire = true;
+  if (!ui && !busy && S.mode === 'build') {
     const sl = S.inv.slots[P.slot], pm = sl && ITEMS[sl.id].place;
     if (input.down[2] && pm && Math.hypot(S.mouse.x - P.x, S.mouse.y - P.y - 0.9) < 6) placeMat(sl, pm, dt);
+    if (input.hit('x') && sl) { const d = ITEMS[sl.id], n = d.u === 'ea' ? 1 : d.u === 'rd' ? Math.min(sl.n, 30) : Math.min(sl.n, 15 / d.m); S.drop(sl.id, inv.take(S.inv, sl.id, n)); audio.play('thud'); events.emit('dropped'); }
   }
-  P.drilling = drilling; audio.loop('drill', drilling ? 0.4 : 0, 520 + P.heat * 500);
+  if (!ui && !busy && input.key('v') && S.mode !== 'blueprint') gather(dt); else P.gatherT = 0;
   if (!ui && combat) {
-    const wn = heldWeapon(), wp = wn && WEAPON[wn]; P.weapon = wn;
+    const wp = wn && WEAPON[wn];
     if (wp) {
       if (P.reload > 0) { P.reload -= dt; if (P.reload <= 0) { const got = inv.take(S.inv, wp.ammo, wp.mag - P.mag[wn]); P.mag[wn] += Math.round(got); } }
       else if ((input.hit('r') && P.mag[wn] < wp.mag) || (input.down[0] && P.mag[wn] <= 0)) { if (S.count(wp.ammo) >= 1) { P.reload = wp.reload; audio.play('click'); } else if (input.clicked[0] || input.hit('r')) { S.say('no ' + wp.ammo); audio.play('click'); } }
@@ -110,41 +124,64 @@ export function stepPlayer(dt) {
     }
   } else P.reload = 0;
   // corpse recovery
-  if (S.corpse && Math.hypot(S.corpse.x - P.x, S.corpse.y - P.y) < 1.2) { for (const s of S.corpse.inv) if (s) S.add(s[0], s[1]); S.corpse = null; audio.play('click'); }
-  light.lamp.x = P.x / TS + Math.cos(P.aim) * 0.6; light.lamp.y = (P.y + 1.55) / TS + Math.sin(P.aim) * 0.6; light.lamp.ang = P.aim; light.lamp.k = (P.hurtT > 0 ? (Math.random() < 0.5 ? 0.2 : 1) : 1) * (P.bat.wh > 0 ? 1 : 0.15);
+  if (S.corpse && Math.hypot(S.corpse.x - P.x, S.corpse.y - P.y) < 1.2) { for (const s of S.corpse.inv) if (s) { const left = S.add(s[0], s[1]); if (left > 1e-6) S.drop(s[0], left); } S.corpse = null; audio.play('click'); }
+  P.printing = S.printer.q.length > 0 && P.ground && Math.abs(P.vx) < 0.5 && !P.wantFire && !K.laser.firing && !P.act && !P.reach && !(combat && wn) && !S.printer.stall;     // the arm is at work: the weapon hangs in the other hand
+  stepRig(dt, mob, ax);
+  const hx = P.x + Math.sin(P.rig.lean) * 0.8, hy = P.y + P.rig.py + 0.78;
+  light.lamp.x = hx / TS + Math.cos(P.aim) * 0.5; light.lamp.y = hy / TS + Math.sin(P.aim) * 0.5; light.lamp.ang = P.aim; light.lamp.k = (P.hurtT > 0 ? (Math.random() < 0.5 ? 0.2 : 1) : 1) * (P.bat.wh > 0 ? 1 : 0.15);
 }
-// the laser drill: a heavy beam that carves the field where it lands
-const LASER = { range: 11, r: 0.52, rate: 3.4 };
-function laser(dt) {
-  const [mx, my] = muzzle(1.0), dx = Math.cos(P.aim), dy = Math.sin(P.aim), hit = world.ray(mx, my, dx, dy, LASER.range), len = hit ? hit.d : LASER.range, ex = mx + dx * len, ey = my + dy * len;
-  P.beam = { x1: mx, y1: my, x2: ex, y2: ey, hit: !!hit };
-  P.bat.wh = Math.max(0, P.bat.wh - SUIT.laserW * dt / 3600); P.heat += dt * 0.47; if (P.heat >= 1) { P.vent = 2.4; audio.play('groan'); S.say('drill overheated: venting'); }
-  env.noise(ex, ey, 42); G.shake = Math.max(G.shake, 0.035); P.vx -= dx * dt * 1.2;
-  for (let t = 0.3; t < len; t += 0.4) { const px = mx + dx * t, py = my + dy * t; floraHit(px, py, dt * 14, 0.2); for (const c of creatures) hurtCreature(c, px, py, 240 * dt, dx * 40, dy * 40, true); }
-  for (let t = 0; t < len; t += 3) light.emit((mx + dx * t) / TS, (my + dy * t) / TS, 0.9, 0.36, 0.08);
-  if (!hit) return;
-  const acc = {}; world.dig(ex + dx * 0.3, ey + dy * 0.3, LASER.r, LASER.rate * dt, acc);
-  let total = 0, k0 = hit.mat;
-  for (const k in acc) { const kg = acc[k]; if (kg <= 0) continue; const m = MAT[k], keep = kg * m.keep; total += kg; S.stats.vapor += kg - keep + (m.item ? S.give(m.item, keep) : keep); }
-  S.stats.dug += total; heatAt(ex, ey, 0.8, dt * 5); env.pollute(ex, ey, total * 0.002);
-  light.emit(ex / TS, ey / TS, 3.6, 1.7, 0.5);
-  world.normal(ex, ey, nv); const nx = nv[0] - dx * 0.5, ny = nv[1] - dy * 0.5, rc = k0 === M.SOIL ? [0.14, 0.1, 0.09] : k0 === M.HIVE ? [0.2, 0.06, 0.08] : [0.11, 0.12, 0.14];
-  for (let i = 0, q = Math.floor(dt * 170 + Math.random()); i < q; i++) { S.parts.spawn({ x: ex, y: ey, vx: nx * rand(2, 13) + rand(-5, 5), vy: ny * rand(2, 13) + rand(-3, 7), life: rand(0.15, 0.8), size: rand(0.025, 0.06), c: [5, 2.6, 0.8], c2: [0.9, 0.12, 0.02], col: 1, bounce: 0.5 }); }
-  if (Math.random() < dt * 40) S.parts.spawn({ x: ex, y: ey, vx: nx * rand(1, 4) + rand(-1, 1), vy: ny * rand(1, 4) + rand(0, 3), life: rand(0.8, 2), size: rand(0.06, 0.11), c: [4, 1.4, 0.2], c2: [0.25, 0.02, 0.01], col: 1, bounce: 0.05 });           // molten droplets
-  if (Math.random() < dt * 45) S.parts.spawn({ x: ex, y: ey, vx: nx * rand(2, 8) + rand(-2, 2), vy: ny * rand(2, 8) + rand(0, 4), life: rand(0.8, 2.2), size: rand(0.05, 0.14), asp: rand(0.6, 1.6), c: rc, mode: 1, shape: 0, col: 1, bounce: 0.35, spin: rand(-14, 14), fade: 0 });   // debris
-  if (Math.random() < dt * 30) S.parts.spawn({ x: ex + rand(-0.2, 0.2), y: ey + rand(-0.2, 0.2), vx: nx * rand(0.3, 1.5) + rand(-0.4, 0.4), vy: rand(0.5, 1.8), life: rand(1.2, 3), size: rand(0.25, 0.5), grow: 2.6, c: [0.13, 0.12, 0.12], mode: 1, a: 0.3, grav: -0.03, drag: 0.9 });   // smoke
+// hold V: the hands take loose matter within reach into the suit, as fast as hands can, as much as the suit carries
+function gather(dt) {
+  const c = matter.near(P.x + P.face * 0.3, P.y + 0.5, SUIT.reach, q => !q.claim); if (!c) { P.gatherT = 0; return; }
+  P.reach = { x: c.x, y: c.y }; if (c.temp > 0.7) { if (S.msgT <= 0) S.say('too hot to carry yet', 1.2); return; }
+  const d = ITEMS[c.id]; P.gatherT += dt; let n = d.u === 'ea' ? (P.gatherT > 0.45 ? 1 : 0) : Math.min(c.n, SUIT.gather * dt / d.m); if (!n) return; if (d.u === 'ea') P.gatherT = 0;
+  const left = S.add(c.id, n), got = n - left; if (got > 1e-9) { matter.take(c, got); S.gain(c.id, got); P.exert = Math.min(1, P.exert + dt * 0.15); if (Math.random() < dt * 6) audio.play('step'); events.emit('gathered', c.id); } else if (S.msgT <= 0) S.say('the suit carries no more', 1.5);
+}
+// the body: feet that step on real ground, a sprung pelvis, a torso that leans, a heavy weapon that follows late
+function stepRig(dt, mob, ax) {
+  const g = P.rig, sp = Math.abs(P.vx), mv = sp > 0.3 ? Math.sign(P.vx) : 0, k = mob.k, F2 = g.f;
+  const stride = (0.36 + 0.075 * sp) * (1 - 0.22 * k), T = clamp(0.34 - 0.017 * sp, 0.17, 0.34) * (1 + 0.35 * k);
+  for (let i = 0; i < 2; i++) {
+    const f = F2[i], o = F2[1 - i];
+    if (!P.ground) { const tx = P.x - P.vx * 0.035 + (i ? 0.12 : -0.1) * P.face, ty = P.y + 0.1 + (i ? 0.07 : 0) + clamp(-P.vy * 0.012, -0.08, 0.2), q = Math.min(1, dt * 16); f.x += (tx - f.x) * q; f.y += (ty - f.y) * q; f.t = -1; f.air = true; continue; }
+    if (f.air) { f.air = false; f.x = P.x + (i ? 0.14 : -0.12) * P.face; f.y = world.groundY(f.x, P.y + 0.7, 0.3, 1.6) ?? P.y; f.t = -1; }
+    if (f.t >= 0) {
+      f.t += dt / T; const u = Math.min(1, f.t), e = u * u * (3 - 2 * u); f.tx += P.vx * dt * 0.45;
+      f.x = lerp(f.sx, f.tx, e); f.y = lerp(f.sy, f.ty, e) + Math.sin(u * Math.PI) * (0.09 + 0.035 * sp) * (1 - 0.4 * k);
+      if (u >= 1) { f.t = -1; f.y = world.groundY(f.x, P.y + 0.7, 0.3, 1.6) ?? f.ty; if (sp > 0.5) { audio.play('step'); env.noise(P.x, P.y, (sp > 7 ? 9 : 5) + k * 6); if (k > 0.4) G.shake = Math.max(G.shake, 0.012); if (Math.random() < 0.3 + k * 0.5) dust(f.x, f.y, 1); } }
+    } else {
+      const home = P.x + (i ? 0.14 : -0.12) * P.face, lag = (P.x - f.x) * mv, far = Math.hypot(f.x - P.x, f.y - (P.y + HIP0)) > 0.93;
+      if ((mv ? lag > stride * 0.5 : Math.abs(f.x - home) > 0.11 && sp < 0.3) || far) {
+        if (o.t < 0 || far) { f.t = 0; f.sx = f.x; f.sy = f.y; f.tx = mv ? P.x + mv * stride * 0.5 + P.vx * T * 0.8 : home; f.ty = world.groundY(f.tx, P.y + 0.7, 0.3, 1.6) ?? P.y;
+          if (mv && sp > 4.2 - k && Math.abs(f.ty - P.y) > 0.4 && Math.random() < 0.35 + k * 0.4) stumble(0.3 + k * 0.25, mv); }
+      }
+    }
+  }
+  // the pelvis hangs as high as the planted legs allow, on a spring that the load makes softer
+  let hip = HIP0 - k * 0.035 - (P.stumble > 0 ? 0.16 * Math.min(1, P.stumble * 4) : 0) - (P.act ? 0.1 : 0) - (P.reach ? 0.2 : 0);
+  if (P.ground) for (const f of F2) if (f.t < 0) { const dx = f.x - P.x; hip = Math.min(hip, f.y - P.y + Math.sqrt(Math.max(0.25, 0.9 * 0.9 - dx * dx))); }
+  g.pv += ((hip - g.py) * 170 / (1 + k * 0.9) - g.pv * 21) * dt; g.py = clamp(g.py + g.pv * dt, 0.52, 0.93);
+  const accx = (P.vx - g.lvx) / dt; g.lvx = P.vx; g.ax = lerp(g.ax, clamp(accx, -40, 40), Math.min(1, dt * 9));
+  const leanT = clamp(P.vx * 0.024 + g.ax * 0.007, -0.34, 0.34) + (hasReactor() ? 0.13 * P.face : 0) + (P.stumble > 0 ? g.sdir * 0.45 * Math.min(1, P.stumble * 5) : 0) + (P.act ? clamp((P.act.x - P.x) * 0.25, -0.3, 0.3) : P.reach ? clamp((P.reach.x - P.x) * 0.3, -0.35, 0.35) : 0);
+  g.lv += ((leanT - g.lean) * 75 - g.lv * 13) * dt; g.lean = clamp(g.lean + g.lv * dt, -0.7, 0.7);
+  g.breath += dt * (1.5 + P.exert * 4.5); g.head = lerp(g.head, clamp(Math.sin(P.aim), -0.6, 0.6), Math.min(1, dt * 8));
+  // the weapon swings after the aim: a heavy thing on two arms
+  const heavy = hasLaser(), rest = P.act || P.stumble > 0.15 || P.reach || P.printing ? (P.face > 0 ? -0.95 : Math.PI + 0.95) : P.aim, d = angDiff(rest, P.wa), ks = heavy ? 85 : 240, kd = heavy ? 15 : 26;
+  P.wv += (d * ks - P.wv * kd) * dt; P.wa += P.wv * dt;
+  const shx = P.x + Math.sin(g.lean) * 0.52, shy = P.y + g.py + Math.cos(g.lean) * 0.52;
+  P.gx = shx + Math.cos(P.wa) * 0.26 - P.recoil * 2 * Math.cos(P.wa); P.gy = shy - 0.15 + Math.sin(P.wa) * 0.22 + Math.sin(g.breath) * 0.006;
 }
 // RMB with soil, basalt or plate in the selected slot: a smooth brush that spends exactly what it adds
 function placeMat(sl, mat, dt) {
   const x = S.mouse.x, y = S.mouse.y; if (Math.abs(x - P.x) < 0.75 && y > P.y - 0.4 && y < P.y + 2.2) return;
   const rho = MAT[mat].rho * 0.02, r = Math.min(0.34, Math.sqrt(sl.n / (Math.PI * rho * 1.35))); if (r < 0.08) return;
-  const acc = {}; world.fill(x, y, r, mat, dt * 2.2, acc);
-  for (const k in acc) { if (acc[k] < 0) inv.take(S.inv, sl.id, -acc[k]); else if (MAT[k].item) S.add(MAT[k].item, acc[k]); }
+  const acc = {}; world.fill(x, y, r, mat, dt * 2.2, acc); P.reach = { x, y };
+  for (const k in acc) { if (acc[k] < 0) inv.take(S.inv, sl.id, -acc[k]); else if (MAT[k].item) { const left = S.add(MAT[k].item, acc[k]); if (left > 1e-6) S.drop(MAT[k].item, left); } }
   if (Math.random() < dt * 20) dust(x, y, 1);
 }
 function dust(x, y, n) { for (let i = 0; i < n; i++) S.parts.spawn({ x: x + rand(-0.3, 0.3), y: y + rand(0, 0.15), vx: rand(-1.6, 1.6), vy: rand(0.1, 1.4), life: rand(0.6, 1.6), size: rand(0.12, 0.3), grow: 1.5, c: [0.16, 0.15, 0.16], mode: 1, a: 0.35, grav: 0.05, drag: 2 }); }
 export function fire(kind) {
-  const wp = WEAPON[kind], [mx, my] = muzzle(wp.len), sp = (wp.spread + P.bloom) * (1 - 0.6 * P.ads) * (P.ground ? 1 : 1.8);
+  const wp = WEAPON[kind], [mx, my] = gunMuzzle(wp.len), sp = (wp.spread + P.bloom) * (1 - 0.6 * P.ads) * (P.ground ? 1 : 1.8);
   P.mag[kind]--; P.cool = wp.cool; P.shots++; S.stats.shots++; P.flashT = 0.045;
   for (let i = 0; i < wp.n; i++) { const a = P.aim + rand(-sp, sp); S.bullets.push({ x: mx, y: my, vx: Math.cos(a) * wp.v0 * rand(0.97, 1.03) + P.vx, vy: Math.sin(a) * wp.v0 + P.vy, life: 2.2, tr: kind === 'rifle' ? P.shots % 3 === 0 : i % 3 === 0, dmg: wp.dmg, px: mx, py: my }); }
   P.vx -= Math.cos(P.aim) * wp.kick; P.vy -= Math.sin(P.aim) * wp.kick * 0.6; G.shake += kind === 'rifle' ? 0.05 : 0.2; P.recoil += wp.rec * (1 - 0.4 * P.ads); P.bloom = Math.min(0.05, P.bloom + wp.rec * 0.35);
@@ -183,34 +220,47 @@ export function drawPlayer(b, time) {
     else b.seg(bl.x, bl.y, bl.x - dx / l * len, bl.y - dy / l * len, bl.tr ? 0.045 : 0.03, bl.tr ? [5, 2.6, 0.8] : [1.2, 0.9, 0.5], bl.tr ? 1 : 0.5, 2, 2); }
   if (S.corpse) { b.add(S.corpse.x, S.corpse.y + 0.14, 1.5, 0.3, 0.05, C.suit, 1, 2, 1); b.add(S.corpse.x + 0.5, S.corpse.y + 0.2, 0.3, 0.3, 0, mul(C.amber, 1.5 + Math.sin(time * 4)), 0.8, 1, 2); }
   if (P.dead > 0) return;
-  const f = P.face, hipX = P.x, hipY = P.y + 0.86, sw = P.ground ? Math.min(1, Math.abs(P.vx) / 4) : 0.3, lean = clamp(P.vx * 0.012, -0.12, 0.12);
-  for (let i = 0; i < 2; i++) {     // legs, far one first and darker
-    const ph = P.walk + i * Math.PI, fx = P.x + Math.sin(ph) * 0.34 * sw * Math.sign(P.vx || f), fy = P.y + 0.04 + Math.max(0, Math.cos(ph)) * 0.2 * sw + (P.ground ? 0 : 0.12);
-    const [kx, ky] = ik2(hipX, hipY, fx, fy, 0.45, 0.45, f), c = i ? C.suit : mul(C.suit, 0.6);
-    b.seg(hipX, hipY, kx, ky, 0.19, c, 1, 2, 1); b.seg(kx, ky, fx, fy, 0.16, c, 1, 2, 1); b.add(fx + f * 0.07, fy, 0.3, 0.12, 0, C.dark, 1, 2, 1);
-  }
-  const shX = hipX + lean * 4, shY = P.y + 1.4, combat = S.mode === 'combat', item = combat ? P.weapon : S.mode === 'build' ? 'drill' : null;
-  b.add(hipX - f * 0.24 + lean * 2, P.y + 1.12, 0.26, 0.52, lean, mul(C.steel, 0.8), 1, 0, 1, 3);            // pack: battery, printer
-  if (S.printer.q.length) b.add(hipX - f * 0.24, P.y + 1.2, 0.07, 0.07, 0, mul(C.cyan, 2 + Math.sin(time * 9)), 1, 1, 2);
-  b.seg(hipX, hipY, shX, shY, 0.36, C.suit, 1, 2, 1);
-  b.add(shX + f * 0.02, P.y + 1.63, 0.34, 0.36, 0, mul(C.suit, 1.2), 1, 2, 1);                               // helmet
-  b.add(shX + f * 0.1, P.y + 1.64, 0.15, 0.13, 0, mul(combat ? C.red : C.amber, 0.5), 1, 2, 2);              // visor
-  b.add(hipX - f * 0.3, P.y + 1.28, 0.05, 0.05, 0, mul(C.amber, 2.5), 1, 1, 2);
-  const ca = Math.cos(P.aim), sa = Math.sin(P.aim), gl = item === 'rifle' ? 1.05 : item === 'shotgun' ? 0.9 : 0.95;
-  const gx = shX + ca * 0.5, gy = shY - 0.04 + sa * 0.5;
-  if (item === 'drill') {          // heavy tool: body, cooling fins that glow with heat, emitter
-    b.add(shX + ca * 0.45, shY - 0.05 + sa * 0.45, 0.8, 0.24, P.aim, C.dark, 1, 0, 1, 5); b.add(shX + ca * 0.2, shY - 0.14 + sa * 0.2, 0.34, 0.2, P.aim, mul(C.steel, 0.8), 1, 0, 1, 2);
-    for (let i = 0; i < 3; i++) b.add(shX + ca * (0.5 + i * 0.1), shY - 0.05 + sa * (0.5 + i * 0.1), 0.04, 0.3, P.aim, [0.12 + P.heat * 3, 0.12 + P.heat * 0.7, 0.13], 1, 0, P.heat > 0.2 ? 2 : 1);
-    b.add(shX + ca * 0.92, shY - 0.05 + sa * 0.92, 0.16, 0.16, 0, mul(C.amber, P.drilling ? 6 : 0.8), 1, 1, 2);
-  } else if (item) { b.add(shX + ca * gl * 0.5, shY - 0.04 + sa * gl * 0.5, gl, item === 'shotgun' ? 0.1 : 0.085, P.aim, C.dark, 1, 0, 1, 5); b.add(shX + ca * 0.18, shY - 0.1 + sa * 0.18, 0.3, 0.13, P.aim, mul(C.steel, 0.7), 1, 0, 1, 2); }
-  const [ex, ey] = ik2(shX, shY, gx, gy, 0.32, 0.32, -f); b.seg(shX, shY, ex, ey, 0.13, C.suit, 1, 2, 1); b.seg(ex, ey, gx, gy, 0.12, C.suit, 1, 2, 1);
-  const B = P.beam;
-  if (B) {
-    const fl = 0.8 + 0.2 * Math.sin(time * 70) * Math.sin(time * 31), len = Math.hypot(B.x2 - B.x1, B.y2 - B.y1);
-    b.seg(B.x1, B.y1, B.x2, B.y2, 0.55, [1.0, 0.28, 0.04], 0.3 * fl, 2, 2); b.seg(B.x1, B.y1, B.x2, B.y2, 0.2, [2.6, 0.9, 0.15], 0.75, 2, 2); b.seg(B.x1, B.y1, B.x2, B.y2, 0.07, [7, 5, 2.6], fl, 2, 2);
-    for (let i = 0; i < 4; i++) { const t = ((time * 9 + i / 4) % 1) * len; b.add(B.x1 + ca * t, B.y1 + sa * t, 0.5, 0.16, P.aim, [4, 2, 0.6], 0.6, 1, 2); }
-    b.add(B.x1, B.y1, 0.9, 0.9, 0, [3, 1.4, 0.4], 0.8, 1, 2);
-    if (B.hit) { b.add(B.x2, B.y2, 3.4, 3.4, 0, [1.6, 0.5, 0.08], 0.5 * fl, 1, 2); b.add(B.x2, B.y2, 1.2, 1.2, 0, [6, 3.4, 1.2], fl, 1, 2); b.add(B.x2, B.y2, 2.6, 0.12, time * 3, [5, 3, 1], 0.7, 1, 2); b.add(B.x2, B.y2, 2.2, 0.1, -time * 2.3 + 1, [5, 3, 1], 0.6, 1, 2); }
-  }
-  if (P.flashT > 0) { const [mx, my] = muzzle(); b.add(mx + ca * 0.25, my + sa * 0.25, 1.5, 0.55, P.aim, [6, 4, 1.6], 1, 1, 2); b.add(mx, my, 1.1, 1.1, 0, [3, 1.8, 0.6], 0.8, 1, 2); light.emit(mx / TS, my / TS, 3.2, 2.2, 1.0); }
+  const g = P.rig, f = P.face, lean = g.lean, sl = Math.sin(lean), cl = Math.cos(lean), suit = C.suit, br = Math.sin(g.breath), hot = P.hurtT > 0 ? 1.6 : 1;
+  const stf = g.f[0].t >= 0 ? g.f[1] : g.f[1].t >= 0 ? g.f[0] : null, hipX = P.x + sl * 0.04 + (stf && P.ground ? clamp((stf.x - P.x) * 0.14, -0.06, 0.06) : 0), hipY = P.y + g.py,      // the weight goes over the standing foot
+        chX = hipX + sl * 0.52, chY = hipY + cl * 0.52 + br * 0.008, hdX = chX + Math.sin(lean * 0.6) * 0.3 + f * 0.02, hdY = chY + Math.cos(lean * 0.6) * 0.28, mvd = Math.abs(P.vx) > 0.3 ? Math.sign(P.vx) : f;
+  const leg = (i, shade) => { const f0 = g.f[i], fdx = f0.x - hipX, fdy = f0.y + 0.07 - hipY + 0.04, fd = Math.hypot(fdx, fdy), fk = fd > 0.9 ? 0.9 / fd : 1, ft = { x: hipX + fdx * fk, y: hipY - 0.04 + fdy * fk - 0.07, t: f0.t }, ax = ft.x - mvd * 0.03, ay = ft.y + 0.07, kn = ik2(hipX, hipY - 0.04, ax, ay, THIGH, SHIN, mvd), c = mul(suit, shade * hot), sw = ft.t >= 0 ? Math.sin(Math.min(1, ft.t) * Math.PI) : 0;
+    b.seg(hipX, hipY - 0.04, kn[0], kn[1], 0.21, c, 1, 2, 1, i, 0.2, 0, 0.5); b.seg(kn[0], kn[1], ax, ay, 0.17, c, 1, 2, 1, i + 2, 0.22, 0, 0.5); b.add(kn[0] + mvd * 0.03, kn[1], 0.15, 0.13, 0, mul(C.steel, shade * 0.9), 1, 2, 1);        // thigh, shin, knee plate
+    b.add(ft.x + mvd * 0.06, ft.y + 0.055, 0.32, 0.13, -mvd * sw * 0.5 + (P.ground ? 0 : -mvd * 0.3), mul(C.dark, 1.3 * shade), 1, 2, 1, 0, 0, 0, 0.4); };
+  const arm = (sx, sy, hx, hy, shade, metal, bend) => { let dx = hx - sx, dy = hy - sy; const d = Math.hypot(dx, dy); if (d > 0.62) { hx = sx + dx / d * 0.62; hy = sy + dy / d * 0.62; } const e = ik2(sx, sy, hx, hy, 0.32, 0.32, bend), c = metal ? mul(C.steel, 1.1 * shade) : mul(suit, shade * hot);
+    b.seg(sx, sy, e[0], e[1], 0.14, c, 1, 2, 1, 5, 0.15, 0, 0.5); b.seg(e[0], e[1], hx, hy, 0.115, c, 1, 2, 1, 6, 0.15, 0, 0.5); b.add(hx, hy, 0.1, 0.1, 0, mul(C.dark, 1.6), 1, 2, 1); if (metal) { b.add(e[0], e[1], 0.1, 0.1, 0, C.dark, 1, 2, 1); b.add(lerp(e[0], hx, 0.7), lerp(e[1], hy, 0.7), 0.05, 0.05, 0, mul(C.cyan, S.printer.q.length ? 2.5 + Math.sin(time * 11) : 0.7), 1, 1, 2); } return [hx, hy]; };
+  const item = hasLaser() ? 'laser' : S.mode === 'combat' && P.weapon ? P.weapon : null, ca = Math.cos(P.wa), sa = Math.sin(P.wa), shX = chX - f * 0.02, shY = chY - 0.02;
+  const far = g.f[0].t >= 0 || (g.f[1].t < 0 && (g.f[0].x - P.x) * f < (g.f[1].x - P.x) * f) ? 0 : 1;     // draw the trailing leg first
+  leg(far, 0.58);
+  // far arm: the suit's own arm on the rear grip, or swinging against the stride
+  const swing = clamp((g.f[1].x - g.f[0].x) * 0.55, -0.3, 0.3), printing = !!P.printing, pj = S.printer.q[0];
+  if (item) arm(shX + f * 0.05, shY, P.gx - ca * 0.05, P.gy - sa * 0.05, 0.6, false, -f);
+  else arm(shX + f * 0.04, shY, shX + f * 0.04 + swing, shY - 0.56 + Math.abs(swing) * 0.12, 0.6, false, -f);
+  // back: the reactor on its frame, or the life-support pack
+  if (hasReactor()) { const bx = chX - f * 0.36 - sl * 0.1, by = chY - 0.16 + br * 0.006; b.seg(chX - f * 0.1, chY + 0.12, bx, by + 0.3, 0.05, C.dark, 1, 2, 1); b.seg(hipX - f * 0.1, hipY + 0.05, bx, by - 0.3, 0.05, C.dark, 1, 2, 1); drawReactor(b, bx, by, lean - f * 0.06, time, K.reactor.load); }
+  else { b.add(chX - f * 0.24, chY - 0.12, 0.24, 0.5, lean, mul(C.steel, 0.8), 1, 0, 1, 3, 0, 0, 0.4); b.add(chX - f * 0.3, chY + 0.04, 0.05, 0.05, 0, mul(C.amber, 2.5), 1, 1, 2); }
+  b.seg(hipX, hipY, chX, chY, 0.37 + br * 0.012, mul(suit, hot), 1, 2, 1, 1, 0, 0, 0.55);                               // torso
+  b.add(lerp(hipX, chX, 0.2), lerp(hipY, chY, 0.2), 0.36, 0.1, lean, mul(C.dark, 1.4), 1, 2, 1);                        // belt
+  b.add(chX + f * 0.1, chY - 0.02, 0.17, 0.26, lean, mul(C.steel, 0.62), 1, 0, 1, 2);                                    // chest unit
+  if (hasReactor()) b.seg(chX + f * 0.12, chY + 0.16, chX - f * 0.14, chY - 0.3, 0.05, C.dark, 1, 2, 1);                // strap
+  leg(1 - far, 1);
+  b.add(hdX, hdY + 0.06, 0.35, 0.37, lean * 0.4, mul(suit, 1.25 * hot), 1, 2, 1, 0, 0, 0, 0.7);                          // helmet
+  b.add(hdX - f * 0.06, hdY - 0.1, 0.3, 0.09, lean * 0.4, mul(C.dark, 1.5), 1, 2, 1);                                    // collar ring
+  b.add(hdX + f * 0.1 + Math.cos(P.aim) * 0.012, hdY + 0.07 + g.head * 0.03, 0.16, 0.14, g.head * 0.3 * f, mul(S.mode === 'combat' ? C.red : C.amber, 0.5), 1, 2, 2);   // visor
+  if (light.lamp.on) b.add(hdX + f * 0.14, hdY + 0.2, 0.07, 0.07, 0, mul(C.warm, 3 * light.lamp.k), 1, 1, 2);
+  // what the hands hold
+  if (item === 'laser') drawLaser(b, P.gx, P.gy, P.wa, time, K.laser.heat, K.laser.firing && K.laser.frac >= 0.6);
+  else if (item) { const gl = item === 'rifle' ? 1.05 : 0.9; b.add(P.gx + ca * gl * 0.4, P.gy + sa * gl * 0.4, gl, item === 'shotgun' ? 0.1 : 0.085, P.wa, C.dark, 1, 0, 1, 5); b.add(P.gx + ca * 0.08, P.gy - 0.06 + sa * 0.08, 0.3, 0.13, P.wa, mul(C.steel, 0.7), 1, 0, 1, 2); }
+  // near arm: the prosthetic one, bare metal, with the matter compiler in its wrist
+  let hand;
+  if (P.act) hand = arm(shX, shY, P.act.x, P.act.y + Math.sin(time * 14) * 0.03, 1, true, f);
+  else if (P.reach) hand = arm(shX, shY, P.reach.x, P.reach.y + 0.08, 1, true, f);
+  else if (printing) hand = arm(shX, shY, shX + f * 0.44, shY - 0.26 + Math.sin(time * 3) * 0.02, 1, true, f);
+  else if (item) hand = arm(shX, shY, P.gx + ca * 0.4 - sa * 0.02 * f, P.gy + sa * 0.4 - 0.07, 1, true, f);
+  else hand = arm(shX, shY, shX - swing, shY - 0.56 + Math.abs(swing) * 0.12, 1, true, f);
+  // the compiler at work: the part grows in the air in front of the hand, line by line
+  if (printing && pj) { const pr = 1 - pj.left / pj.total, ox = hand[0] + f * 0.42, oy = hand[1] - 0.12, sz = 0.42, c = ITEMS[Object.keys(RECIPE[pj.r].out)[0]].c || C.steel, fl = 0.7 + 0.3 * Math.sin(time * 50);
+    b.add(ox, oy - sz / 2 + sz * pr / 2, sz, sz * pr, 0, mul(c, 0.7), 1, 0, 1, 4); b.add(ox, oy - sz / 2 + sz * pr, sz + 0.06, 0.025, 0, [1, 3, 3.4], fl, 0, 2); b.add(ox, oy, sz * 2.4, sz * 2.4, 0, mul(C.cyan, 0.12), 0.8, 1, 2); for (const [ax, ay, bx, by] of [[-1, -1, 1, -1], [1, -1, 1, 1], [1, 1, -1, 1], [-1, 1, -1, -1]]) b.seg(ox + ax * sz / 2, oy + ay * sz / 2, ox + bx * sz / 2, oy + by * sz / 2, 0.008, [0.3, 1.4, 1.5], 0.35, 0, 2);     // the frame of what is not there yet
+    for (const d of [-1, 1]) b.seg(hand[0], hand[1], ox + d * sz * 0.5, oy - sz / 2 + sz * pr, 0.012, [0.5, 2.2, 2.4], 0.5 * fl, 0, 2); b.add(ox, oy - sz / 2 + sz * pr, 0.5, 0.3, 0, mul(C.cyan, 0.5), 0.6 * fl, 1, 2); light.emit(ox / TS, oy / TS, 0.05, 0.4 * fl, 0.4 * fl);
+    if (Math.random() < 0.25) S.parts.spawn({ x: ox + rand(-sz / 2, sz / 2), y: oy - sz / 2 + sz * pr, vx: rand(-0.6, 0.6), vy: rand(0.2, 1.2), life: rand(0.2, 0.5), size: 0.022, c: [1, 3, 3.4], grav: 0.2 }); }
+  if (P.flashT > 0) { const [mx, my] = gunMuzzle(); b.add(mx + ca * 0.25, my + sa * 0.25, 1.5, 0.55, P.wa, [6, 4, 1.6], 1, 1, 2); b.add(mx, my, 1.1, 1.1, 0, [3, 1.8, 0.6], 0.8, 1, 2); light.emit(mx / TS, my / TS, 3.2, 2.2, 1.0); }
 }
