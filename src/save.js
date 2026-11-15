@@ -4,7 +4,7 @@
 // identity can replace it later with save.use(adapter): nothing else in the game touches storage.
 // A blob is { version, rev, savedAt, hash, data }. data = { seed, act, time, playerId, parts: { name: dump } }.
 import { G } from './core.js';
-export const VERSION = 6;
+export const VERSION = 7;
 // version n -> n + 1. Version 1 was demo 1, which had no saves. Version 3 (round 3) added the kit (ship laser and
 // reactor instead of the laser drill item), loose matter, the ship hold and the stock targets: a version 2 save gets
 // the kit on the player's back, an empty hold, and no loose matter. Its rifle and shotgun stay in the pack.
@@ -37,6 +37,18 @@ const MIGRATE = { 1: b => { b.version = 2; return b; }, 2: b => { b.version = 3;
     const k = []; for (let x = -30; x < 30; x++) for (let y = -12; y < 8; y++) k.push([(x + 8192) * 16384 + y + 8192, 1]); s.geo = { k, s: 1, a: 0 };
     if (s.supply && s.supply.t) { delete s.supply.t['power cell']; delete s.supply.t['o2 cell']; }
     for (const r of s.robots || []) r.wh = r.k ? 400 : 250;
+    return b; },
+  // version 7 (round 7): the ship never had a matter compiler. The job its "fabricator" was on is undone and what it
+  // had taken goes back into the hold (supply.js does it when it loads); the wreck gets the machine shop it really has
+  // (the part that was the fabricator is the mill; the printers and the bench are added behind the parts a save counts).
+  // Belts the AI had queued by itself are withdrawn (the ones it had built stand): it only proposes now. The old rock
+  // pile by the ship is closed (what lies in it goes to the spoil heap, or into a berm); the planners are handed over;
+  // nothing is felled, filled or printed yet; the arm is whole.
+  6: b => { b.version = 7; const s = b.data && b.data.parts && b.data.parts.surface; if (!s) return b;
+    if (s.supply) { if (s.supply.fab) s.supply.refund = s.supply.fab[0]; delete s.supply.fab; s.supply.shop = {}; }
+    s.fills = null; s.trees = []; s.arm = { made: {}, runs: {}, n: 0, bad: 0 }; s.v7grant = 1; if (s.suit) s.suit.arm = 1;
+    if (s.stock && s.stock.z) for (const z of s.stock.z) if (z[1] === 'rock pile') { z[1] = 'old rock pile'; z[6] = 0; }
+    if (s.bp && s.bp.g) s.bp.g = s.bp.g.filter(g => !(g[0] === 'belt' && g[7]));
     return b; } };
 const parts = {};
 export function fnv(str) { let h = 0x811c9dc5; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(16).padStart(8, '0'); }

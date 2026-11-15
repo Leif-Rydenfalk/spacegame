@@ -21,10 +21,10 @@ import { env } from './env.js';
 import { P, SUIT, WEAPON, spawnAt, stepPlayer, stepBullets, drawPlayer, hurt, bodyDepth } from './player.js';
 import { creatures, stepCreatures, drawCreatures, spawnCreature, spawnHerd, KIND, stance } from './creatures.js';
 import { F, ROCKET_PARTS, nearest, stepFactory, drawFactory, buildScenario, place, dumpFactory, loadFactory } from './factory.js';
-import { BP, stepBlueprint, drawBlueprint, addGhost, dumpBP, loadBP, cursorKind, tryPlace, plannable, unlocked, setBlueprint } from './blueprint.js';
+import { BP, stepBlueprint, drawBlueprint, addGhost, dumpBP, loadBP, cursorKind, tryPlace, plannable, unlocked, setBlueprint, toolSlot, pageOf, copyArea, pasteBlueprint, deconArea, upgradeArea, beltPath, snapPort, placeReal, acceptProposal, padFor, dismantle } from './blueprint.js';
 import { PL, addPlat, platAt, drawPlats, dumpPlats, loadPlats, shiftPlats } from './layers.js';
-import { robots, stepRobots, drawRobots, spawnRobot, wakeShipRobots, dumpRobots, loadRobots, ROBOT, intentOf } from './robots.js';
-import { flora, stepFlora, drawFlora, resetFlora } from './flora.js';
+import { robots, stepRobots, drawRobots, spawnRobot, wakeShipRobots, dumpRobots, loadRobots, ROBOT, intentOf, AUDIT, resetAudit } from './robots.js';
+import { flora, stepFlora, drawFlora, resetFlora, treesIn, markTrees, treeRec, treeCut, treeSaw, treeJobs, dumpTrees, loadTrees } from './flora.js';
 import { sites, stepSites, drawSites, siteUse, siteDamage, dumpSites, loadSites } from './sites.js';
 import { hive, stepHive, dumpHive, loadHive, sendWave } from './hive.js';
 import { structsIn, slotStruct, resetStructs } from './structures.js';
@@ -33,7 +33,11 @@ import { heat } from './heat.js';
 import { matter, matterHeat } from './matter.js';
 import { K, SHIP, kitReset, kitUse, kitHint, stepKit, drawKit, drawKitBeam, drawWreck, reactorPos, dumpKit, loadKit, isLinked, firePulse } from './kit.js';
 import { mobility, REACTOR_W, LASER_W, SUIT_BUS_W, CABLE, SHIP_LINK } from './power.js';
-import { SUP, stepSupply, dumpSupply, loadSupply, holdRoom } from './supply.js';
+import { SUP, stepSupply, dumpSupply, loadSupply, holdRoom, shopOk, shopSpeed, armEta, bidProducers, whoName } from './supply.js';
+import { FILL, BERM, addFill, fillPut, drawFills, dumpFills, loadFills, backfillShaft, pickSpoilSite, spoilSiteX, baseSpan } from './spoil.js';
+import { RIG, binKg } from './things.js';
+import { RECIPE, SHOP, toolRecipe, toolCan, producersOf, yieldOf } from '../items.js';
+import { kerfWoodJ, pulsesToFell, sawTime, logsOf, WOOD } from './physics.js';
 import { stepLife, drawLife } from './life.js';
 import { AUTO, PORT, queueView, drawAuto, dumpAuto, loadAuto } from './auto.js';
 import { EXO, BOOT, BOOT_LINES, NEEDS, MASK, DAY, suitStats, resetSuit, dumpSuit, loadSuit, needWorst, repairSuit } from './suit.js';
@@ -41,9 +45,9 @@ import { WRECK, HULL, wreckReset, wreckUse, wreckHint, stepWreck, toWorld, partN
 import { MINE, stepMine, drawMine, dumpMine, loadMine, spawnRock, spanAt, addSupport } from './mine.js';
 import { GEO, dumpGeo, loadGeo, levelAt, estimate, fmtEst, composition, mark } from './geology.js';
 import { FOG, stepFog, stepScan, drawFog, visible, knownG, knownR, storageCap, dumpFog, loadFog, scanDone } from './fog.js';
-import { STOCK, drawZones, zoneKg, reachable, ledger, addZone, zoneFor, dumpStock, loadStock } from './stock.js';
+import { STOCK, drawZones, zoneKg, reachable, ledger, addZone, zoneFor, dumpStock, loadStock, removeZone } from './stock.js';
 import { NET, drawNet } from './net.js';
-import { stepCollide, HIT } from './collide.js';
+import { stepCollide, HIT, impact, STEP } from './collide.js';
 import { nextSteps, STAGES } from './next.js';
 import { MARKET } from './robots.js';
 import { LOG } from './market.js';
@@ -73,6 +77,13 @@ planet.onShift((fx, fg) => {
 const BIOME = ['fungal forest', 'violet thicket', 'acid marsh'], DIR = { t: 0, pred: 0 };
 flora.drop = (id, n, x, y) => matter.spawn(id, n, x, y, rand(-0.8, 0.8), rand(0.5, 2));
 S.shakeBy = v => { G.shake += v; };
+F.spill = (id, n, x, y) => { matter.spawn(id, n, x, y, rand(-0.4, 0.4), 0.6); };      // what falls off a belt lies on the ground: nothing on a belt is lost
+F.onShaftGone = m => { const f = backfillShaft((m.x + m.w / 2) * TS, m.y * TS, m.depth || 0, RIG.width); if (f) LOG.say(`the shaft at ${((m.x + 1) * TS).toFixed(0)} m is open and its rig is gone: it is backfilled with spoil, ${f.need.toFixed(0)} kg`, G.time); };
+STOCK.ghosts = () => BP.ghosts; STOCK.onOpen = z => { if (z.name === 'spoil heap') LOG.say(`spoil heap sited ${Math.abs(z.x0 + 3.5 - SHIP.x).toFixed(0)} m ${z.x0 < SHIP.x ? 'west' : 'east'} of the wreck: level ground, clear of the base`, G.time); };
+// a falling trunk strikes what is under it, by the speed of the part of it that reaches the body (collide.js impact)
+flora.hurt = (c, a, b) => { const ex = b[0] - a[0], ey = b[1] - a[1], L2 = ex * ex + ey * ey, hitAt = (x, y) => { const u = clamp(((x - a[0]) * ex + (y - a[1]) * ey) / L2, 0, 1); return Math.hypot(x - a[0] - ex * u, y - a[1] - ey * u) < 0.7 ? u : -1; };
+  if (!P.dead && !(c.hitP > G.time)) { const u = hitAt(P.x, P.y + 1); if (u > 0.15) { const h = impact(c.d * c.H * 0.02 * WOOD.rho * 0.5, c.w * c.H * u); if (h.dmg > 0) { c.hitP = G.time + 3; hurt(h.dmg, c.dir * 2, 0); events.emit('treeHit', { dmg: h.dmg }); } } }
+  for (const q of creatures) { if (q.hp <= 0 || q.treeT > G.time) continue; const u = hitAt(q.x, q.y); if (u > 0.15 && c.w * c.H * u > STEP.hurtV) { q.treeT = G.time + 3; q.hp -= impact(20, c.w * c.H * u).dmg; q.hurtT = 3; } } };
 F.sink = (cx, y, id, n) => S.crash && cx === PORT.x && y === PORT.y ? inv.add(K.hold, id, n) : null;      // a belt that ends at the wreck's intake feeds the ship hold
 S.loose = (id, n, x, y) => matter.spawn(id, n, x, y, rand(-1, 1), rand(1, 3));       // what a kill or a broken thing leaves lies in the world
 S.thud = (c, v) => { if (thudT > 0 || Math.abs(c.x - P.x) > 16) return; thudT = 0.09; audio.play(c.kg > 20 ? 'thud' : 'tink'); env.noise(c.x, c.y, 6 + Math.min(14, c.kg * 0.3)); };
@@ -83,8 +94,12 @@ events.on('openMachine', m => { if (!ui.open) ui.openMachine(m); });
 S.crack = (c, parts) => { if (Math.abs(c.x - P.x) > 30) return; for (let i = 0; i < 6; i++) S.parts.spawn({ x: c.x + rand(-c.r, c.r), y: c.y + rand(-c.r, c.r), vx: c.vx * 0.3 + rand(-2.5, 2.5), vy: c.vy * 0.3 + rand(-0.5, 3), life: rand(0.3, 0.9), size: rand(0.03, 0.07), c: mul(ITEMS[c.id].c || C.steel, 0.5), mode: 1, shape: 0, col: 1, bounce: 0.3 }); for (let i = 0; i < 3; i++) S.parts.spawn({ x: c.x, y: c.y, vx: rand(-1, 1), vy: rand(0, 1), life: rand(0.6, 1.4), size: rand(0.2, 0.4), grow: 1.5, c: [0.16, 0.15, 0.16], mode: 1, a: 0.3, grav: 0.03, drag: 2 }); if (thudT <= 0) { thudT = 0.07; audio.play('tink'); env.noise(c.x, c.y, 14); } };
 function give(list, into = S.inv) { for (const [k, n] of list) inv.add(into, k, n); }
 const baseKit = () => give([['iron', 24], ['copper', 6], ['basalt', 30], ['o2 cell', 1], ['power cell', 1]]);
-// the wreck's hold as it lies after the crash: metal, water, food, a spare cell
-const holdKit = () => give([['iron', 14], ['copper', 6], ['o2 cell', 1], ['water', 40], ['ration', 6]], K.hold);
+// the wreck's hold as it lies after the crash: metal, water, food, a spare cell, and what the machine shop was stocked
+// with: a little powder and polymer, a spare controller and two spare boards (round 7: nothing here makes a chip but the arm)
+const holdKit = () => give([['iron', 14], ['copper', 6], ['o2 cell', 1], ['water', 40], ['ration', 6], ['metal powder', 4], ['polymer', 5], ['controller', 1], ['pcb', 2]], K.hold);
+// the planners are data: the AI hands them over when it comes up (one of each; a new empty blueprint is free in the inventory window)
+export const PLANNERS = ['blueprint', 'blueprint book', 'deconstruction planner', 'upgrade planner'];
+export function grantPlanners() { for (const k of PLANNERS) if (S.count(k) < 1 && !(S.crash && inv.count(K.hold, k) >= 1)) { const free = S.inv.slots.findIndex((q, i) => !q && i >= 9); if (free >= 0) { S.inv.slots[free] = { id: k, n: 1 }; S.known.add(k); } } }
 const guns = () => give([['rifle', 1], ['shotgun', 1], ['rifle rounds', 120], ['shells', 18]]);
 const flatten = (x0, x1) => { world.box(x0, 0, x1, 14, -1); world.box(x0, -1.5, x1, 0, 1, M.BASALT); };
 // the ground the slice is played on: an outcrop of basalt with a seam of iron ore in it, east of the wreck
@@ -96,6 +111,46 @@ function antennaUp(gx = 4) { const m = place('antenna', gx, 0, 1, true); return 
 // ---- round 6 scenarios: one for each thing the round delivers (tools/check.mjs opens every one) ---------------------------
 const aimAt = (x, y) => { toScr(x, y); input.mx = scr[0]; input.my = scr[1]; };
 const base6 = (x, robotsOn = true) => { S.slice = true; sliceGround(); spawnAt(x); if (robotsOn) wakeShipRobots(); hive.quiet = true; S.stats.dug = 400; S.stage = 3; holdKit(); give([['o2 cell', 1], ['power cell', 1]]); light.lamp.on = true; mark(13.6, 0.8, 5, 1); };
+// ---- round 7 scenarios: one for each fix (docs/ROUND7.md section 1, and section 7) -----------------------------------------
+const flat7 = (x0, x1) => { flatten(x0, x1); flora.clear = [x0, x1]; };
+const ROUND7 = {
+  // 1 loose rock: a pile across the way, and the body sprints at it: up, over and down the other side, unhurt
+  rockwalk() { base6(-2, false); flat7(-6, 26); spawnAt(0); kitReset('wreck'); const rk = [[22, 3.2], [9, 3.9], [30, 4.4], [14, 4.9], [26, 5.3], [7, 5.9], [38, 6.4], [18, 6.9], [11, 7.4], [28, 7.9], [45, 9.6], [16, 10.2]]; for (const [kg, x] of rk) matter.spawn('basalt', kg, x, 0.6 + (x % 1) * 0.8); for (const [kg, x] of [[16, 4.4], [12, 5.6], [20, 6.6]]) matter.spawn('basalt', kg, x, 1.5);
+    S.rock0 = { hp: 100, x: 0 }; return () => { input.keys.delete('d'); input.keys.delete('Shift'); if (G.auto && G.time > 2.5 && !S.rock0.done) { input.keys.add('d'); input.keys.add('Shift'); if (P.x > 13.5) { S.rock0.over = true; } if (S.rock0.over) { input.keys.delete('d'); input.keys.add('a'); if (P.x < 6.6) S.rock0.done = true; } } if (S.rock0.done) input.keys.delete('a'); aimAt(P.x + 4, P.y + 1.4); }; },
+  // 2 the idle audit: work of every kind, three robots, and the window that says who is idle and why
+  idleaudit() { base6(4); place('furnace', -2, 0, 1, true); give([['basalt', 60], ['iron', 30], ['copper', 8], ['chest', 1], ['controller', 1]], K.hold); for (let i = 0; i < 10; i++) matter.spawn('iron ore', 3 + (i % 3) * 2, 8 + i * 0.45, 0.6 + (i % 2) * 0.3); for (let i = 0; i < 6; i++) spawnRock(MATS.BASALT, 5 + i, 6.2 + i * 0.6, 1.2);
+    matter.spawn('basalt', 70, 20, 0.8); const hot = matter.spawn('basalt', 9, 22, 0.8); hot.temp = 6; addGhost('chest', 21, 0); addGhost('assembler', 16, 0); SUP.targets = { iron: 20 }; ui.toggleAI(true); },
+  // 3 deconstruction: a worn furnace, a chest with iron in it, a line of belt and two decks, all inside one drag of the planner
+  decon() { base6(3); flat7(6, 30); const f = place('furnace', 16, 0, 1, true); f.hp = 132; const ch = place('chest', 20, 0, 1, true); inv.add(ch.inv, 'iron', 12); for (let x = 10; x < 15; x++) place('belt', x, 0, 1, true); addPlat(24, 1); addPlat(25, 1); addPlat(24, 0); addPlat(25, 0); grantPlanners(); const i = S.inv.slots.findIndex(q => q && q.id === 'deconstruction planner'); S.inv.slots[2] = S.inv.slots[i]; S.inv.slots[i] = null; P.slot = 2; SUP.targets = {}; P.x = -1; aimAt(10, 1.4); S.decon0 = deconArea(9, 0, 27, 4); return () => aimAt(10, 1.4); },
+  // 4 belts like Factorio: a line dragged from the furnace's port, along the ground, up a lift and along a deck into the assembler's port; lumps riding it
+  belts() { base6(2); flat7(2, 34); world.box(18.5, 0, 30, 2, 1, MATS.BASALT); K.reactor.state = 'ground'; K.reactor.x = 4; K.reactor.y = 0.4; const fu = place('furnace', 12, 0, 1, true); fu.inp['iron ore'] = 80; fu.out.iron = 320; const as = place('assembler', 44, 4, 1, true); as.recipe = 'part';
+    for (const [x, y, d] of beltPath({ x: 14, y: 0, dir: 1 }, 36, 3)) placeReal('belt', x, y, d, true); for (const [x, y, d] of beltPath({ x: 36, y: 4, dir: 1 }, 43, 4)) placeReal(x > 39 ? 'fast belt' : 'belt', x, y, d, true);
+    S.add('belt', 12); P.slot = S.inv.slots.findIndex(q => q && q.id === 'belt'); SUP.targets = {}; SUP.on = false; P.x = 13; aimAt(15.2, 3.2); },
+  // 4b the AI proposes, it does not lay: a furnace and an assembler on level ground; in blueprint mode the line it would lay is drawn, and waits for y
+  propose() { S.slice = true; spawnAt(10.6); antennaUp(-3); wakeShipRobots(); hive.quiet = true; S.stats.dug = 400; S.stage = 3; give([['belt', 8], ['iron', 30], ['copper', 6]], K.hold); give([['o2 cell', 1], ['power cell', 1]]); light.lamp.on = true;
+    const f1 = place('furnace', 2, 0, 1, true), as = place('assembler', 14, 0, 1, true); f1.inp['iron ore'] = 70; as.recipe = 'part'; SUP.targets = { iron: 20, part: 6 }; S.mode = 'blueprint'; aimAt(4, 1.2); },
+  // 5 the planners are items: a blueprint that holds a small line, pasted once and on the cursor again; the book, the two planners in their slots
+  planners() { base6(3); flat7(4, 40); place('chest', 12, 0, 1, true); place('furnace', 15, 0, 1, true); for (let x = 17; x < 20; x++) place('belt', x, 0, 1, true); const as = place('assembler', 20, 0, 1, true); as.recipe = 'chest'; grantPlanners(); give([['iron', 80], ['basalt', 60], ['copper', 12], ['belt', 8], ['controller', 2]], K.hold);
+    const put = (k, slot) => { const i = S.inv.slots.findIndex(q => q && q.id === k); const a = S.inv.slots[slot]; S.inv.slots[slot] = S.inv.slots[i]; S.inv.slots[i] = a; return S.inv.slots[slot]; }, bp = put('blueprint', 0), bk = put('blueprint book', 1); put('deconstruction planner', 2); put('upgrade planner', 3);
+    bp.d = { bp: copyArea(12, 0, 23, 3) }; bk.d = { pages: [copyArea(15, 0, 20, 3), copyArea(12, 0, 14, 3)], sel: 0 }; pasteBlueprint(bp.d.bp, 31, 0); S.up0 = upgradeArea(17, 0, 20, 1); P.slot = 0; SUP.targets = {}; P.x = 22; aimAt(28, 0.3); return () => aimAt(28.2, 0.3); },
+  // 6 the shaft rig hoists everything: the bucket on its rope, the collar bin filling, a drone taking from it, nothing lying at the face
+  collar() { base6(1); const m = place('shaft rig', 12, 0, 1, true); m.target = 6; m.head = 'rotary'; m.inp['drill rod'] = 6; m.inp.casing = 6; m.paid = 2; give([['drill rod', 8], ['casing', 8], ['iron', 30]], K.hold); K.reactor.state = 'ship'; SUP.targets = {}; P.x = 9; aimAt(12.4, -1.5); },
+  // 7 spoil: the heap far from the base on the back layer, a berm going up on the hive's side, a pad under a machine planned on a slope
+  spoil() { base6(2); flat7(-2, 30); world.box(10.9, -1.2, 12.1, 0, -1, 0); place('furnace', 8, 0, 1, true); place('chest', 12, 0, 1, true); place('assay station', 16, 0, 1, true); give([['iron', 40], ['chest', 2], ['basalt', 40]], K.hold); for (let i = 0; i < 26; i++) matter.spawn(i % 5 === 4 ? 'soil' : 'basalt', 16 + (i % 4) * 5, 3 + (i % 13) * 0.9, 0.8 + (i % 3) * 0.5);
+    S.mode = 'blueprint'; S.plan = 'chest'; tryPlace('chest', 22, 0, false); S.plan = null; S.mode = 'build'; SUP.targets = {}; P.x = 14; aimAt(22, 2); return () => aimAt(P.x + 8, 2.4); },
+  // 7b the same later, from the other side: the body walks past the heap, in front of it
+  heap() { base6(2); flat7(-70, 30); place('furnace', 8, 0, 1, true); place('chest', 12, 0, 1, true); const z = addZone('spoil heap', ['basalt', 'soil', 'slag'], -52, 7, 12000, true); for (let i = 0; i < 34; i++) { const c = matter.spawn(i % 5 === 4 ? 'soil' : 'basalt', 14 + (i % 4) * 7, -55 + (i % 9) * 0.75, 0.8 + Math.floor(i / 9) * 0.6); c.zone = z.id; c.back = true; }
+    matter.spawn('basalt', 30, -49.6, 0.8); SUP.targets = {}; SUP.on = false; spawnAt(-58); S.heap0 = { hp: 100 }; return () => { input.keys.delete('d'); if (G.auto && P.x < -49.2) input.keys.add('d'); aimAt(P.x + 3, P.y + 1.5); }; },
+  // 8 a tree against the laser: the trunk charring, the kerf a part of the way through, the count of pulses still to go
+  trees() { base6(30, false); kitReset('carried'); let t0 = null, st = 0; return () => { if (!t0) { const ts = treesIn(P.x - 40, P.x + 60).filter(q => q.st === 0 && q.d < 0.62).sort((a, b) => Math.abs(a.x - P.x - 6) - Math.abs(b.x - P.x - 6)); if (!ts.length) return; t0 = ts[0]; spawnAt(t0.x - 3.2); K.reactor.state = 'ground'; K.reactor.x = t0.x - 4.4; K.reactor.y = world.groundY(t0.x - 4.4, P.y + 3, 0, 8) + 0.4; S.tree0 = t0.id; }
+      const c = treeRec(t0.id), ty = t0.y + 0.6; if (c && c.st === 2) { const L = logsOf(c.H, c.d), u = (c.sec + 0.5) / L.n * WOOD.trunk; aimAt(c.x + Math.sin(c.ang) * c.dir * c.H * u, c.y + 0.3 + Math.cos(c.ang) * c.H * u); } else aimAt(t0.x, ty); input.down[0] = G.auto && (!c || c.st !== 1); }; },
+  // 8b felling as a job: two trees marked with the deconstruction planner; the drones saw them, they fall, and are cut into logs
+  felling() { base6(30); let done = false; SUP.targets = {}; return () => { if (done) { aimAt(P.x + 5, P.y + 3); return; } const ts = treesIn(P.x - 30, P.x + 40).filter(q => q.st === 0).sort((a, b) => Math.abs(a.x - P.x - 8) - Math.abs(b.x - P.x - 8)); if (ts.length < 1) return; done = true; const t0 = ts[0]; spawnAt(t0.x - 7); for (const t of ts.slice(0, 2)) markTrees(t.x - 0.2, t.y - 1, t.x + 0.2, t.y + 1, true); S.tree0 = t0.id; }; },
+  // the tools by real input (tools/ui-flow.mjs): belts in slot 5, the four planners in slots 1 to 4, a worn furnace to work on, level ground
+  tools7() { base6(10, false); flat7(2, 34); const f = place('furnace', 26, 0, 1, true); f.hp = 110; grantPlanners(); PLANNERS.forEach((k, i) => { const j = S.inv.slots.findIndex(q => q && q.id === k), a = S.inv.slots[i]; S.inv.slots[i] = S.inv.slots[j]; S.inv.slots[j] = a; }); S.inv.slots[4] = { id: 'belt', n: 12 }; S.known.add('belt'); SUP.on = false; SUP.targets = {}; P.slot = 8; P.x = 10; aimAt(12, 2); },
+  // section 7: the ship has no matter compiler. A chest goes to the mill in the wreck, a camera to the powder printer, a board to the bench; the chip is the arm's
+  shop() { base6(4); give([['iron', 40], ['copper', 10], ['basalt', 30], ['silicon', 2]], K.hold); for (const [k, n] of [['iron', 3], ['copper', 2], ['silicon', 1], ['basalt', 44]]) S.add(k, n); addGhost('chest', 16, 0); addGhost('furnace', 12, 0); orderItem('camera', 1, 'stock'); orderItem('pcb', 3, 'stock'); orderItem('cpu', 2, 'stock'); SUP.targets = { iron: 10 }; K.reactor.state = 'carried'; ui.toggleAI(true); },
+};
 const ROUND6 = {
   // the new start played by itself: out of the bunk, aft to the locker, the suit on, the boot
   suitup() { S.slice = true; S.dev = false; kitReset('wreck'); sliceGround(); resetSuit(false); holdKit(); const bp = toWorld(partNamed('bunk').lx + 0.1, 0); spawnAt(bp[0]); enterWreck(true); P.o2 = MASK.bare; light.lamp.on = false; hive.quiet = true; const lx = toWorld(partNamed('suit locker').lx, 0)[0];
@@ -148,7 +203,7 @@ function stepBoot(dt) {
   if (BOOT.t < 0 || BOOT.done) return; const t0 = BOOT.t; BOOT.t += dt;
   for (let i = 0; i < BOOT_LINES.length; i++) if (t0 < BOOT_LINES[i][0] && BOOT.t >= BOOT_LINES[i][0]) { BOOT.shown = i + 1; audio.play('click'); events.emit('bootLine', i); }
   if (t0 < 4.3 && BOOT.t >= 4.3) { if (S.crash) wakeShipRobots(); light.lamp.on = true; }
-  if (BOOT.t >= 6.2) { BOOT.done = true; S.stage = Math.max(S.stage || 1, 2); if (S.crash) for (const q of K.hold.slots) if (q) S.known.add(q.id); P.bat.wh = Math.max(P.bat.wh, 300); P.o2 = Math.max(P.o2, MASK.suit * 0.8); P.prop = 2; events.emit('booted'); LOG.say('ai online: one system, and you are part of it', G.time); }
+  if (BOOT.t >= 6.2) { BOOT.done = true; S.stage = Math.max(S.stage || 1, 2); if (S.crash) for (const q of K.hold.slots) if (q) S.known.add(q.id); P.bat.wh = Math.max(P.bat.wh, 300); P.o2 = Math.max(P.o2, MASK.suit * 0.8); P.prop = 2; grantPlanners(); events.emit('booted'); LOG.say('ai online: one system, and you are part of it', G.time); }
 }
 const up = t => BOOT.done || BOOT.t > t;
 export const surface = {
@@ -162,7 +217,7 @@ export const surface = {
   },
   begin(scenario) {
     planet.reset(); loadAuto(null); resetSuit(true); wreckReset(); loadMine(null); loadGeo(null); loadFog(null); loadStock(null); S.stage = 1; S.dev = !!scenario; S.inside = null; S.attacker = null; S.defend = 'always'; G.warp = 1; LOG.lines.length = 0; SUP.wanted = []; EXO.water = 0;
-    K.fab = null; S.plan = null; S.tool = null; S.mode = 'build'; S.known = new Set(); PL.cells.clear(); S.zo = S.zoT = 1; input.mx = G.w / 2 + 260; input.my = G.h / 2 + 46; S.crash = true; S.slice = false; kitReset('carried'); DIR.t = 0; DIR.pred = 0;
+    K.fab = null; SUP.shop = {}; SUP.latent = []; loadFills(null); loadTrees(null); resetAudit(); BP.dmarks.length = 0; BP.belt = null; BP.box = null; S.printer.made = {}; S.printer.runs = {}; S.printer.n = 0; S.printer.bad = 0; EXO.arm = 1; flora.clear = null; HIT.hits = 0; HIT.climbs = 0; S.proposals = []; S.plan = null; S.tool = null; S.mode = 'build'; S.known = new Set(); PL.cells.clear(); S.zo = S.zoT = 1; input.mx = G.w / 2 + 260; input.my = G.h / 2 + 46; S.crash = true; S.slice = false; kitReset('carried'); DIR.t = 0; DIR.pred = 0;
     if (scenario === 'factory') { S.calm = 150; S.crash = false; hive.quiet = true; flora.clear = [-14, 10]; baseKit(); buildScenario(); spawnAt(-6); K.reactor.state = 'ground'; K.reactor.x = -8; K.reactor.y = 0.4; S.add('part', 6); S.add('biomass', 12); spawnCreature('grazer', 9, 1.2); }
     else if (scenario === 'blueprint') {     // a hub, three drones, a chest of kits, and a queue for them
       S.crash = false; hive.quiet = true; flora.clear = [-18, 18]; baseKit(); flatten(-16, 16); spawnAt(3); const hub = place('hub', -1, 0, 1, true), ch = place('chest', -6, 0, 1, true);
@@ -192,7 +247,7 @@ export const surface = {
       spawnAt(44); hive.quiet = true; const g = world.groundY(59, surfaceH(59) + 6, 0, 20) || 0, c = spawnCreature('stalker', 59, g + 1); c.dir = -1; c.state = 'stalk'; input.mx = G.w / 2 + 330; input.my = G.h / 2 + 10;
       auto = () => { if (G.auto) { P.hp = Math.max(P.hp, 60); S.flash = Math.min(S.flash, 0.2); } };
     } else if (scenario === 'supply' || scenario === 'targets') {      // demand and supply: a furnace, the arm, loose ore, and the ship's robots carrying between them
-      S.slice = true; sliceGround(); spawnAt(4); antennaUp(); wakeShipRobots(); place('furnace', -2, 0, 1, true); give([['iron', 6], ['copper', 6]], K.hold); give([['basalt', 44], ['iron ore', 8], ['o2 cell', 1], ['power cell', 1]]);
+      S.slice = true; sliceGround(); spawnAt(4); antennaUp(); wakeShipRobots(); place('furnace', -2, 0, 1, true); give([['iron', 9], ['copper', 6]], K.hold); give([['basalt', 44], ['iron ore', 8], ['o2 cell', 1], ['power cell', 1]]);
       for (let i = 0; i < 9; i++) matter.spawn('iron ore', 6 + (i % 3) * 3, 8 + i * 0.5, 0.6 + (i % 2) * 0.3); for (let i = 0; i < 6; i++) matter.spawn('basalt', 9 + i, 7.5 + i * 0.7, 1.2); S.stats.dug = 400; hive.quiet = true; input.mx = G.w / 2 + 160; input.my = G.h / 2 + 60; if (scenario === 'targets') ui.toggleAI(true);       // 'targets': the same, with the stock-target editor open
     } else if (scenario === 'ruins') { const st = slotStruct(-2); spawnAt(st.mouth[0] - 3); hive.quiet = true; baseKit(); }
     else if (scenario === 'base') { const st = slotStruct(2); spawnAt(st.door[0] + (st.door[0] < st.x ? -4 : 4)); hive.quiet = true; baseKit(); }
@@ -201,7 +256,7 @@ export const surface = {
     else if (scenario === 'autobuild' || scenario === 'queue') {
       // place and it gets built: four frames set down with no kit anywhere. The AI orders the kits, the arm prints
       // them from what the robots bring it, the robots build in the queue's order. 'queue' opens the AI window on it.
-      S.slice = true; sliceGround(); spawnAt(1); antennaUp(-4); wakeShipRobots(); hive.quiet = true; S.stats.dug = 400; give([['basalt', 70], ['iron', 46], ['copper', 14], ['iron ore', 30]], K.hold); give([['o2 cell', 1], ['power cell', 1]]);
+      S.slice = true; sliceGround(); spawnAt(1); antennaUp(-4); wakeShipRobots(); hive.quiet = true; S.stats.dug = 400; give([['basalt', 70], ['iron', 46], ['copper', 14], ['iron ore', 30], ['controller', 2]], K.hold); give([['o2 cell', 1], ['power cell', 1]]);
       for (let i = 0; i < 7; i++) matter.spawn('iron ore', 7 + (i % 3) * 3, 8.2 + i * 0.5, 0.7 + (i % 2) * 0.3);
       addGhost('assembler', 9, 0); addGhost('chest', 14, 0); addGhost('furnace', 5, 0); addGhost('hub', -8, 0); for (let j = 0; j < 3; j++) addGhost('wall', 18, j);
       input.mx = G.w / 2 + 220; input.my = G.h / 2 + 40; if (scenario === 'queue') ui.toggleAI(true);
@@ -232,6 +287,7 @@ export const surface = {
       S.mode = 'blueprint'; S.plan = 'assembler'; addGhost('furnace', 5, 0); for (let x = 12; x < 16; x++) addGhost('belt', x, 0); input.mx = G.w / 2 + 420; input.my = G.h / 2 + 62;
     }
     else if (ROUND6[scenario]) auto = ROUND6[scenario]() || null;
+    else if (ROUND7[scenario]) auto = ROUND7[scenario]() || null;
     else if (scenario === 'planet') { spawnAt(-4.5); hive.quiet = true; baseKit(); S.zo = S.zoT = ZMAX; }                 // the whole planet: the disc, the limb, the molten core
     else if (scenario === 'horizon') { spawnAt(60); hive.quiet = true; baseKit(); S.zo = S.zoT = 13; }                     // far enough out that the ground is a curve
     else if (scenario === 'far90') {         // a quarter of the way round and walking on: the camera has turned with the ground
@@ -258,6 +314,7 @@ export const surface = {
           else { input.mx = G.w / 2 + 300 + Math.sin(t * 0.8) * 60; input.my = G.h / 2 + 30 + Math.sin(t * 1.1) * 70; input.down[0] = true; } };
       }
     }
+    if (BOOT.done) grantPlanners();
     for (const s of S.inv.slots) if (s) S.known.add(s.id); if (BOOT.done) for (const s of K.hold.slots) if (s) S.known.add(s.id);
     P.x = planet.update(P.x, true); S.cam.x = P.x; S.cam.y = P.y + 2.2; horizon = surfaceH(P.x); P.wa = P.aim = 0; events.emit('landed');
   },
@@ -308,7 +365,7 @@ export const surface = {
       b.add(x + Math.cos(a) * len * 0.5, top + Math.sin(a) * len * 0.5, len, 1.2 + hash(c, 7, 232) * 2.2, a, [(0.02 + f[0]) * 1.2, (0.03 + f[1]) * 1.2, (0.034 + f[2]) * 1.2], 0.5 + 0.5 * br, 10, 2, c * 3.3); }
     drawFlora(b, time, false); drawSites(b, time);
     if (S.crash) drawWreck(b, time);
-    drawZones(b, time, C, mul); drawPlats(b, S.cam, S.zo); drawNet(b, time); drawFactory(b, time); drawMine(b, time); drawBlueprint(b, time); drawAuto(b, time); matter.draw(b, time); drawFog(b, time); drawCreatures(b, time); drawKit(b, time); drawPlayer(b, time); drawRobots(b, time); drawLife(b, time); S.parts.draw(b, 1.2); drawKitBeam(b, time); if (WRECK.cut < 0.5) drawFlora(b, time, true);
+    drawZones(b, time, C, mul); matter.draw(b, time, true); drawFills(b, time); drawPlats(b, S.cam, S.zo); drawNet(b, time); drawFactory(b, time); drawMine(b, time); drawBlueprint(b, time); drawAuto(b, time); matter.draw(b, time, false); drawFog(b, time); drawCreatures(b, time); drawKit(b, time); drawPlayer(b, time); drawRobots(b, time); drawLife(b, time); S.parts.draw(b, 1.2); drawKitBeam(b, time); if (WRECK.cut < 0.5) drawFlora(b, time, true);
     for (const l of S.lights) light.emit(l.x, l.y, l.c[0], l.c[1], l.c[2]);
     b.end();
     horizon = lerp(horizon, surfaceH(cx), 0.05); backdrop.glare = Math.max(backdrop.glare, S.glare || 0);
@@ -323,7 +380,14 @@ export const surface = {
     ui.update(true);
     const bx = 28, L = K.laser, RX = K.reactor, mob = P.mob || mobility(0), st = P.st || suitStats(); let by = h - 178;
     const o2min = P.o2 / (MASK.perDay / DAY) / 60, steps = nextSteps(), hintL = wreckHint() || kitHint() || sites.hint || (near ? `f  ${near.kind === 'pad' && near.n >= ROCKET_PARTS ? 'board the rocket' : near.kind === 'bunk' ? 'sleep' : 'open ' + near.kind}` : '');
-    const drawNext = () => { let y = 40; txt(c, st.on && BOOT.done ? `next   stage ${S.stage}: ${STAGES[S.stage] || ''}` : 'next', 28, y, { a: 0.35 }); y += 16; for (const q of steps) { txt(c, '> ' + q.do, 28, y, { col: AMBER, a: 0.65 }); y += 14; txt(c, '  ' + q.why, 28, y, { a: 0.4 }); y += 17; } };
+    const drawNext = () => { let y = 40; txt(c, st.on && BOOT.done ? `next   stage ${S.stage}: ${STAGES[S.stage] || ''}` : 'next', 28, y, { a: 0.35 }); y += 16; for (const q of steps) { txt(c, '> ' + q.do, 28, y, { col: AMBER, a: 0.65 }); y += 14; txt(c, '  ' + q.why, 28, y, { a: 0.4 }); y += 17; } return y; };
+    // round 7: the arm's queue, where it is always seen: it is the one matter compiler, what is on it and when it is done
+    const drawArm = y0 => { const q = S.printer.q, armW = P.armW || 5000, cond = EXO.arm === undefined ? 1 : EXO.arm; let y = y0 + 10, t = 0;
+      line(c, 28, y - 12, 300, y - 12, q.length ? 0.5 : 0.15, AMBER); txt(c, `arm   the only matter compiler${cond < 0.99 ? '   ' + (cond * 100).toFixed(0) + ' %' : ''}   ${q.length ? q.length + ' queued, done in ' + Math.ceil(armEta()) + ' s' : 'idle'}`, 28, y, { col: AMBER, a: q.length ? 0.85 : 0.4 }); y += 16;
+      for (const j of q.slice(0, 3)) { t += j.left * 5000 / armW; drawIcon(c, Object.keys(RECIPE[j.r].out)[0], 28, y - 12, 16); txt(c, `${j.r}   ${Math.ceil(t)} s${j.ai ? '' : '   by hand'}${S.printer.stall ? '   ' + S.printer.stall : ''}`, 50, y, { a: 0.65 }); y += 16; }
+      if (q.length > 3) { txt(c, `+ ${q.length - 3} more`, 50, y, { a: 0.4 }); y += 14; }
+      for (const o of (SUP.armNeed || []).filter(o2 => !q.some(j => j.r === o2.recipe)).slice(0, 2)) { txt(c, `waits for the arm: ${o.item} x${o.n}`, 28, y, { a: 0.5 }); y += 14; }
+      for (const t2 in SUP.shop) { const j = SUP.shop[t2]; if (!j) continue; txt(c, `${t2}: ${j.r}   ${Math.ceil(j.left / Math.max(0.05, shopSpeed(t2)))} s`, 28, y, { a: 0.5 }); y += 14; } };
     if (G.warp !== 1 || NEEDS.asleep > 0) txt(c, NEEDS.asleep > 0 ? 'asleep: time runs' : G.warp === 0 ? 'paused (p)' : `time ${G.warp}x   , slower   . faster`, w / 2, 66, { align: 'center', col: AMBER, a: 0.7 });
     if (!st.on) {       // no suit: no instruments. What a person knows without them: the breath in the mask, the weight in the arms
       drawNext(); txt(c, `no suit: no instruments, no link`, bx, h - 96, { col: AMBER, a: 0.6 }); bar(c, bx, h - 66, 150, P.o2 / MASK.bare, P.inAir ? 'mask off: the air in here holds' : `mask ${P.o2.toFixed(2)} kg of oxygen   about ${o2min.toFixed(0)} min`, P.o2 < 0.05 ? RED : INK);
@@ -374,15 +438,15 @@ export const surface = {
       if (qv.length) { txt(c, `build queue ${qv.length}   j: reorder`, w - 28, ry, { align: 'right', a: 0.35 }); ry += 15; for (const q of qv.slice(0, 4)) { txt(c, `${q.n} ${q.kind}${q.auto ? ' (ai)' : ''}: ${q.why.length > 62 ? q.why.slice(0, 60) + '..' : q.why}`, w - 28, ry, { align: 'right', col: /waits for|outside/.test(q.why) ? AMBER : INK, a: 0.6 }); ry += 13; } if (qv.length > 4) { txt(c, `+ ${qv.length - 4} more`, w - 28, ry, { align: 'right', a: 0.35 }); ry += 13; } ry += 6; }
       if (F.machines.length > 1 || pw.demand > 100) { txt(c, `base grid ${(pw.used / 1000).toFixed(1)} / ${(pw.supply / 1000).toFixed(0)} kw   wire loss ${((pw.loss || 0) / 1000).toFixed(2)} kw   ${pw.note}`, w - 28, ry, { align: 'right', col: pw.demand > pw.supply + 1 ? AMBER : INK, a: 0.6 }); ry += 15; }
       for (const r of AUTO.routes.slice(0, 3)) { txt(c, `${r.src.kind} > ${r.dst ? r.dst.kind : 'hold'}  ${r.item} ${r.rate.toFixed(2)} kg/s  ${r.mode === 'belt' ? (r.done ? 'belt' : 'belt, ' + r.missing + ' cells to build') : r.mode === 'robot' ? 'robots' : 'idle'}`, w - 28, ry, { align: 'right', a: 0.45 }); ry += 13; } }
-    if (robots.length) { txt(c, `robots ${robots.length}   loose ${matter.total().toFixed(0)} kg${BP.clears.length ? '   terrain jobs ' + BP.clears.length : ''}`, w - 28, ry, { align: 'right', a: 0.6 }); ry += 15; for (const r of robots.slice(0, 4)) { txt(c, `${r.kind === 'crawler' ? 'hauler' : 'drone'} ${r.id}  ${intentOf(r)}  ${(r.wh / (r.kind === 'crawler' ? 90 : ROBOT.wh) * 100).toFixed(0)}%`, w - 28, ry, { align: 'right', a: 0.45 }); ry += 13; } ry += 8;
+    if (robots.length) { txt(c, `robots ${robots.length}   open jobs ${AUDIT.open}   idle ${AUDIT.idle}   idle beside doable work ${AUDIT.doable + AUDIT.timer}   loose ${matter.total().toFixed(0)} kg${BP.clears.length ? '   terrain jobs ' + BP.clears.length : ''}`, w - 28, ry, { align: 'right', col: AUDIT.rows.some(q => q.can || q.timer) ? AMBER : INK, a: 0.6 }); ry += 15; for (const r of robots.slice(0, 4)) { txt(c, `${r.kind === 'crawler' ? 'hauler' : 'drone'} ${r.id}  ${intentOf(r)}  ${(r.wh / (r.kind === 'crawler' ? 400 : ROBOT.wh) * 100).toFixed(0)}%`, w - 28, ry, { align: 'right', a: 0.45 }); ry += 13; } ry += 8;
       if (S.zo < 2.2 && !ui.open) for (const r of robots) { if (!r.job && r.state !== 'haul') continue; toScr(r.x, r.y + 0.5); if (scr[0] > 60 && scr[0] < w - 440 && scr[1] > 60 && scr[1] < h - 160) txt(c, intentOf(r), scr[0], scr[1], { align: 'center', a: 0.5 }); } }
     if (MARKET.blocked.length) { txt(c, `waits: ${MARKET.blocked[0].text}${MARKET.blocked.length > 1 ? '   +' + (MARKET.blocked.length - 1) : ''}`, w - 28, ry, { align: 'right', col: AMBER, a: 0.55 }); ry += 15; }
     { const ll = LOG.lines[LOG.lines.length - 1]; if (ll && G.time - ll.at < 9) { txt(c, 'ai: ' + (ll.t.length > 86 ? ll.t.slice(0, 84) + '..' : ll.t), w - 28, ry, { align: 'right', a: 0.5 * Math.min(1, 9 - (G.time - ll.at)) }); ry += 15; } }
     if (STOCK.zones.length) { txt(c, STOCK.zones.map(z => `${z.name} ${zoneKg(z).toFixed(0)} kg`).join('   '), w - 28, ry, { align: 'right', a: 0.42 }); ry += 15; }
     if (SUP.wanted.length) { txt(c, 'ordered: ' + SUP.wanted.map(q => `${q.item} x${q.n}`).join(', '), w - 28, ry, { align: 'right', col: AMBER, a: 0.55 }); ry += 15; }
     if (SUP.full && robots.length) { txt(c, 'the hold is full: what does not fit stays where it lies', w - 28, ry, { align: 'right', col: AMBER, a: 0.6 }); ry += 15; }
-    if (K.fab) { txt(c, `fabricator: ${K.fab.r}  ${Math.ceil(K.fab.left)} s`, w - 28, ry, { align: 'right', col: AMBER, a: 0.7 }); ry += 18; }
-    if (S.printer.q.length) { const j = S.printer.q[0]; txt(c, `the arm is printing: ${j.r}  ${Math.ceil(j.left)} s${S.printer.q.length > 1 ? '  +' + (S.printer.q.length - 1) : ''}`, w - 28, ry, { align: 'right', col: AMBER, a: 0.7 }); ry += 18; }
+    if (FILL.list.some(f => !f.done)) { txt(c, 'spoil: ' + FILL.list.filter(f => !f.done).map(f => `${f.kind} ${(100 * f.lvl / f.h).toFixed(0)} %`).join('   '), w - 28, ry, { align: 'right', a: 0.5 }); ry += 15; }
+    if ((S.proposals || []).length) { txt(c, `the ai proposes a belt (${S.proposals[0].cells.length} cells): tab shows it, y plans it`, w - 28, ry, { align: 'right', col: AMBER, a: 0.55 }); ry += 15; }
     S.gains.forEach((g, i) => { drawIcon(c, g.id, w - 52, ry + i * 24 - 4, 22); txt(c, `+ ${fmtAmt(g.id, g.n) || 'x1'} ${g.id}`, w - 58, ry + i * 24 + 10, { align: 'right', a: Math.min(0.85, g.t) }); });
     // altitude tape and compass strip
     const alt = P.y; line(c, 28, h / 2 - 90, 28, h / 2 + 90, 0.25);
@@ -406,10 +470,11 @@ export const surface = {
     if (S.msgT > 0) txt(c, S.msg, w / 2, 84, { align: 'center', col: AMBER, a: Math.min(0.85, S.msgT) });
     if (F.pad) txt(c, F.pad.n >= ROCKET_PARTS ? 'rocket ready: f at the pad to board' : `rocket ${F.pad.n}/${ROCKET_PARTS} parts`, 28, h - 232, { col: AMBER, a: 0.8 });
     if (F.printer) txt(c, 'bio-printer online: body respawns there', 28, h - 216, { a: 0.4 });
-    if (up(5.2)) drawNext();
+    if (up(5.2)) drawArm(drawNext());
+    if (flora.note) txt(c, flora.note.text, w / 2, 120, { align: 'center', col: AMBER, a: Math.min(0.85, flora.note.t) });
     if (MINE.warn) txt(c, `unsupported span ${MINE.warn.span.toFixed(1)} m, safe ${MINE.warn.safe.toFixed(1)} m: about ${MINE.warn.left.toFixed(0)} s`, w / 2, 102, { align: 'center', col: RED, a: 0.9 });
     if (combat) txt(c, 'combat mode', w / 2, h - 80, { align: 'center', col: RED, a: 0.8 });
-    txt(c, combat ? 'lmb fire, or punch with an empty hand   rmb aim   r reload   1-9 weapon   n self-defence   c leaves combat' : 'e inventory   tab blueprint   lmb place / laser   k kerf   h scan   rmb take back   q pipette   f use   v gather   x reactor   g legs   j ai   alt ranges   m planet   p , . time', w / 2, h - 6, { align: 'center', a: 0.28 });
+    txt(c, combat ? 'lmb fire, or punch with an empty hand   rmb aim   r reload   1-9 weapon   n self-defence   c leaves combat' : 'e inventory   tab blueprint   lmb place / laser   k kerf   h scan   rmb take back (hold: take down)   q pipette   r turn   f use   v gather   x reactor   g legs   j ai   alt ranges   m planet   p , . time', w / 2, h - 6, { align: 'center', a: 0.28 });
     const hint = hintL;
     if (hint && !ui.open) txt(c, hint, w / 2, h / 2 + 120, { align: 'center', col: AMBER, a: 0.75 });
     if (BP.hand) { const g = BP.hand; txt(c, g.decon ? `taking apart ${g.kind}` : `building ${g.kind} by hand ${(g.prog * 100).toFixed(0)}%`, w / 2, h / 2 + 138, { align: 'center', a: 0.6 }); }
@@ -438,18 +503,19 @@ const r3 = v => +v.toFixed(3);
 function dumpSurface() {
   return { p: { x: r3(P.x), y: r3(P.y), vx: r3(P.vx), vy: r3(P.vy), hp: r3(P.hp), wh: r3(P.bat.wh), o2: +P.o2.toFixed(5), prop: r3(P.prop), slot: P.slot, mag: { ...P.mag }, lamp: light.lamp.on ? 1 : 0 },
     inv: inv.dump(S.inv), known: [...S.known].sort(), plats: dumpPlats(), printer: S.printer.q.map(j => [j.r, r3(j.left), j.total]), corpse: S.corpse, mode: S.mode, crash: S.crash ? 1 : 0, slice: S.slice ? [r3(DIR.t), DIR.pred] : 0, calm: r3(S.calm), stats: { ...S.stats, kills: { ...S.stats.kills }, dug: r3(S.stats.dug), vapor: r3(S.stats.vapor) },
-    terrain: world.saveDiff(), flora: [...flora.dead].sort(), factory: dumpFactory(), bp: dumpBP(), robots: dumpRobots(), sites: dumpSites(), hive: dumpHive(), env: env.dump(), kit: dumpKit(), matter: matter.dump(), supply: dumpSupply(), auto: dumpAuto(), suit: dumpSuit(), wreck: dumpWreck(), mine: dumpMine(), geo: dumpGeo(), fog: dumpFog(), stock: dumpStock(), stage: S.stage || 1, dev: S.dev ? 1 : 0, defend: S.defend || 'always' };
+    terrain: world.saveDiff(), flora: [...flora.dead].sort(), factory: dumpFactory(), bp: dumpBP(), robots: dumpRobots(), sites: dumpSites(), hive: dumpHive(), env: env.dump(), kit: dumpKit(), matter: matter.dump(), supply: dumpSupply(), auto: dumpAuto(), suit: dumpSuit(), wreck: dumpWreck(), mine: dumpMine(), geo: dumpGeo(), fog: dumpFog(), stock: dumpStock(), fills: dumpFills(), trees: dumpTrees(), arm: { made: { ...(S.printer.made || {}) }, runs: { ...(S.printer.runs || {}) }, n: S.printer.n || 0, bad: S.printer.bad || 0 }, stage: S.stage || 1, dev: S.dev ? 1 : 0, defend: S.defend || 'always' };
 }
 function loadSurface(o) {
   planet.reset(); resetStructs(); view.u.uProf.value.dispose(); view.u.uProf.value = profileTex(); S.zo = S.zoT = 1; world.loadDiff(o.terrain); resetFlora(); flora.dead = new Set(o.flora); creatures.length = 0; S.bullets.length = 0; S.parts.list.length = 0; heat.clear(); auto = null;
   const p = o.p; Object.assign(P, { x: p.x, y: p.y, vx: p.vx, vy: p.vy, hp: p.hp, o2: p.o2, prop: p.prop, slot: p.slot, dead: 0, ground: false, reload: 0, act: null, stumble: 0 }); P.bat.wh = p.wh; P.mag = { ...p.mag }; light.lamp.on = !!p.lamp; for (const f of P.rig.f) f.air = true;
   inv.load(S.inv, o.inv); S.known = new Set(o.known || []); for (const q of S.inv.slots) if (q) S.known.add(q.id); loadPlats(o.plats); S.plan = null; S.tool = null; S.printer.q = o.printer.map(([r, left, total]) => ({ r, left, total })); S.corpse = o.corpse; S.mode = o.mode; S.crash = !!o.crash; S.slice = !!o.slice; DIR.t = o.slice ? o.slice[0] : 0; DIR.pred = o.slice ? o.slice[1] : 0; S.calm = o.calm; S.stats = { ...o.stats, kills: { ...o.stats.kills } }; S.open = null; S.uiOpen = false; S.gains.length = 0;
   loadSuit(o.suit); loadWreck(o.wreck, G.seed); loadMine(o.mine); loadGeo(o.geo); loadFog(o.fog); loadStock(o.stock); S.stage = o.stage || 2; S.dev = !!o.dev; S.defend = o.defend || 'always'; S.attacker = null; LOG.lines.length = 0;
-  loadFactory(o.factory); loadBP(o.bp); loadKit(o.kit); loadRobots(o.robots); loadSites(o.sites); loadHive(o.hive); env.load(o.env); matter.load(o.matter); loadSupply(o.supply); loadAuto(o.auto);
+  loadFills(o.fills); loadTrees(o.trees); resetAudit(); S.printer.made = { ...((o.arm && o.arm.made) || {}) }; S.printer.runs = { ...((o.arm && o.arm.runs) || {}) }; S.printer.n = (o.arm && o.arm.n) || 0; S.printer.bad = (o.arm && o.arm.bad) || 0; S.proposals = [];
+  loadFactory(o.factory); loadBP(o.bp); loadKit(o.kit); loadRobots(o.robots); loadSites(o.sites); loadHive(o.hive); env.load(o.env); matter.load(o.matter); loadSupply(o.supply); loadAuto(o.auto); if (o.v7grant && BOOT.done) grantPlanners();
   P.x = planet.update(P.x, true); S.cam.x = P.x; S.cam.y = P.y + 2.2; horizon = surfaceH(P.x);
 }
 // hooks for tools: time of each draw stage in ms, and the live state
 surface.profile = n => { const b = S.batch, t = {}, T = (k, f) => { const t0 = performance.now(); for (let i = 0; i < n; i++) f(i); t[k] = +((performance.now() - t0) / n).toFixed(2); };
   T('floraBack', i => { b.begin(S.cam.x, S.cam.y, S.ppm); drawFlora(b, i * 0.016, false); t.sprites = b.n; }); T('floraFront', i => { b.begin(S.cam.x, S.cam.y, S.ppm); drawFlora(b, i * 0.016, true); }); T('backdrop', i => { drawBackdrop(S.cam.x, S.cam.y, S.ppm, i * 0.016, 0); t.backSprites = backdrop.batch.n; }); T('sites', i => drawSites(b, i)); T('parts', () => S.parts.draw(b, 1.2)); T('end', () => b.end());
   T('light', i => computeLight(S.cam.x / TS, S.cam.y / TS, i)); T('terrain', i => updateTerrain(S.cam.x, S.cam.y, S.ppm, i, 0)); T('window', () => { world.rev++; updateTerrain(S.cam.x, S.cam.y, S.ppm, 0, 0); }); return t; };
-surface.debug = { firePulse, stepSupply, EXO, BOOT, NEEDS, WRECK, HULL, MINE, GEO, FOG, STOCK, NET, MARKET, LOG, HIT, nextSteps, suitStats, partNamed, toWorld, repairBill, ledger, reachable, zoneKg, zoneFor, addZone, levelAt, estimate, composition, knownG, knownR, spanAt, addSupport, spawnRock, scanDone, orderItem, repairSuit, mark, wakeShipRobots, light, G, events, SHIP, RECIPES, canSee, isLinked, holdRoom, intentOf, PL, addPlat, platAt, cursorKind, tryPlace, plannable, unlocked, setBlueprint, bodyDepth, ui, input, TS, ITEMS, planet, AUTO, queueView, inv, S, P, F, BP, K, SUP, robots, creatures, hive, env, flora, world, sites, matter, heat, backdrop, siteUse, kitUse, spawnCreature, spawnHerd, hurt, slotStruct, structsIn, stance, KIND };
+surface.debug = { AUDIT, resetAudit, FILL, BERM, addFill, fillPut, pickSpoilSite, spoilSiteX, baseSpan, RIG, binKg, RECIPE, SHOP, toolRecipe, toolCan, producersOf, yieldOf, kerfWoodJ, pulsesToFell, sawTime, logsOf, WOOD, treesIn, markTrees, treeRec, treeCut, treeSaw, treeJobs, copyArea, pasteBlueprint, deconArea, upgradeArea, beltPath, snapPort, placeReal, acceptProposal, padFor, toolSlot, pageOf, grantPlanners, PLANNERS, shopOk, shopSpeed, armEta, impact, STEP, removeZone, dismantle, firePulse, stepSupply, EXO, BOOT, NEEDS, WRECK, HULL, MINE, GEO, FOG, STOCK, NET, MARKET, LOG, HIT, nextSteps, suitStats, partNamed, toWorld, repairBill, ledger, reachable, zoneKg, zoneFor, addZone, levelAt, estimate, composition, knownG, knownR, spanAt, addSupport, spawnRock, scanDone, orderItem, repairSuit, mark, wakeShipRobots, light, G, events, SHIP, RECIPES, canSee, isLinked, holdRoom, intentOf, PL, addPlat, platAt, cursorKind, tryPlace, plannable, unlocked, setBlueprint, bodyDepth, ui, input, TS, ITEMS, planet, AUTO, queueView, inv, S, P, F, BP, K, SUP, robots, creatures, hive, env, flora, world, sites, matter, heat, backdrop, siteUse, kitUse, spawnCreature, spawnHerd, hurt, slotStruct, structsIn, stance, KIND };

@@ -12,10 +12,10 @@
 //   power    machines draw from the base grid: the wreck's auxiliary bus, and the reactor when it is in its bay or set
 //            down (or carried) within reach of the grid. Loads are served in the same priority; a starved machine slows.
 import { events } from '../core.js';
-import { RECIPES, RECIPE, ITEMS, massOf, recipeFor } from '../items.js';
+import { RECIPES, RECIPE, ITEMS, massOf, recipeFor, producersOf, effRecipe } from '../items.js';
 import { TS } from './world.js';
 import { S, C, mul } from './state.js';
-import { F, DEFS, canPlace, machineAt, LUMP } from './factory.js';
+import { F, DEFS, canPlace, machineAt, LUMP, isBatch, recipeOf, hasOutBelt } from './factory.js';
 import { BP, addGhost, costOf } from './blueprint.js';
 import { K, SHIP, reactorPos, isLinked } from './kit.js';
 import { powerBudget, REACTOR_W } from './power.js';
@@ -23,14 +23,14 @@ import { wireLoss } from './physics.js';
 import { hive } from './hive.js';
 import { creatures } from './creatures.js';
 
-export const RANK = { 'steel set': -2, 'rock bolt': -2, 'power pole': 0, 'assay station': 1, 'shaft rig': 1, pump: 2, 'air filter': 2, controller: 2, camera: 4, radar: 4, stairs: 5, seat: 7, table: 7, bunk: 7, antenna: 0, hub: 0, miner: 1, furnace: 2, assembler: 3, chest: 4, belt: 5, platform: 5, 'bio-printer': 6, pad: 7, wall: 8 };
+export const RANK = { 'cnc mill': 3, 'metal printer': 3, 'polymer printer': 3, 'solder bench': 3, 'fast belt': 5, 'steel set': -2, 'rock bolt': -2, 'power pole': 0, 'assay station': 1, 'shaft rig': 1, pump: 2, 'air filter': 2, controller: 2, camera: 4, radar: 4, stairs: 5, seat: 7, table: 7, bunk: 7, antenna: 0, hub: 0, miner: 1, furnace: 2, assembler: 3, chest: 4, belt: 5, platform: 5, 'bio-printer': 6, pad: 7, wall: 8 };
 // round 6: real power. An arc furnace is 150 kW, the assembler's compiler 40 kW; the wreck's own bus is 4 kW, so a
 // furnace runs on the reactor (2 MW in its bay or set down) or not at all.
-export const WATT = { belt: 40, miner: 12000, furnace: 150000, assembler: 40000, hub: 300, antenna: 60, 'bio-printer': 500, pad: 200, chest: 0, 'assay station': 6000, 'shaft rig': 30000, pump: 800, 'air filter': 120, controller: 20, camera: 8, radar: 150, 'power pole': 0 };
+export const WATT = { 'cnc mill': 3000, 'metal printer': 2000, 'polymer printer': 300, 'solder bench': 200, belt: 40, miner: 12000, furnace: 150000, assembler: 40000, hub: 300, antenna: 60, 'bio-printer': 500, pad: 200, chest: 0, 'assay station': 6000, 'shaft rig': 30000, pump: 800, 'air filter': 120, controller: 20, camera: 8, radar: 150, 'power pole': 0 };
 export const AUX_W = 4000, GRID_R = 26, BELT_MAX = 44;      // the wreck's own bus; how far a grid node reaches; the longest belt the AI will lay
 export const BOT = { cargo: 15, vEmpty: 9, vFull: 3.1, handle: 4, flyW: 1700 };   // a drone with a full load (physics.js): 15 kg at 3 m/s   // the numbers the route model uses for a drone
 export const PORT = { x: Math.floor((SHIP.x + 3.5) / TS), y: 0 };                 // the hold's intake: a belt that ends here feeds the ship hold
-export const AUTO = { routes: [], links: [], power: { supply: 0, demand: 0, used: 0, note: '' }, status: {}, short: {}, tick: 0, on: true, laid: 0 };
+export const AUTO = { proposals: [], routes: [], links: [], power: { supply: 0, demand: 0, used: 0, note: '' }, status: {}, short: {}, tick: 0, on: true, laid: 0 };
 
 // ---- the queue -----------------------------------------------------------------------------------------------------
 export const queueKey = g => g.key !== undefined && g.key !== null ? g.key : (RANK[g.kind] ?? 9) * 100000 + g.id;
@@ -45,9 +45,9 @@ export function bump(g, dir) {
 }
 
 // ---- demand --------------------------------------------------------------------------------------------------------
-// the producer for a recipe: its own machine if one stands; else the wreck's fabricator, which works straight from the
-// hold ('ship' is in kinds while the wreck is there); else the arm on the suit
-const producerOf = (r, kinds) => kinds.has(r.by) ? r.by : kinds.has('ship') ? 'ship' : 'suit';
+// the producer for a recipe: its own machine if one stands; else a tool of the wreck's machine shop that can make it
+// ('shop:cnc mill' and the like are in kinds while the tool stands in the wreck); only then the arm on the suit
+const producerOf = (r, kinds) => producersOf(r, kinds)[0] || 'suit';
 // round 6: when the caller can ask the producers themselves (kinds.pick), the one that would be done soonest wins
 const pick = (r, kinds) => { if (!kinds.pick) return { who: producerOf(r, kinds) }; return kinds.pick(r); };
 // pure. stock, targets, pending = { item: amount }; builds = [{ id, item, n }] in queue order; kinds = Set of machine
@@ -61,9 +61,9 @@ export function planAll(stock, targets, builds, pending, kinds) {
     const r = recipeFor(item, k => stock[k] || 0);
     if (!r || depth > 4) { short[item] = (short[item] || 0) + need; return item; }
     const batches = Math.ceil(need / r.out[item] - 1e-9); avail[item] += batches * r.out[item] - need;
-    let o = orders.get(item); if (!o) { const pk = pick(r, kinds); orders.set(item, o = { item, need: 0, recipe: r.id, producer: pk.who, bids: pk.bids, batches: 0, inputs: {}, pri, why }); }
-    o.need += need; o.batches += batches; let block = null;
-    for (const k in r.in) { const q = r.in[k] * batches; o.inputs[k] = (o.inputs[k] || 0) + q; const b = want(k, q, pri, why, depth + 1); if (b && !block) block = b; }
+    let o = orders.get(item); if (!o) { const pk = pick(r, kinds), er = effRecipe(pk.who, r); orders.set(item, o = { item, need: 0, recipe: r.id, producer: pk.who, bids: pk.bids, arm: pk.arm, rin: er.in, batches: 0, inputs: {}, pri, why }); }
+    o.need += need; o.batches += batches; let block = null; const rin = o.rin;
+    for (const k in rin) { const q = rin[k] * batches; o.inputs[k] = (o.inputs[k] || 0) + q; const b = want(k, q, pri, why, depth + 1); if (b && !block) block = b; }
     return block;
   };
   builds.forEach((b, i) => { const inStock = (real[b.item] || 0) >= b.n - 1e-9, blk = want(b.item, b.n, i, 'build', 0); if (inStock) real[b.item] -= b.n; status[b.id] = inStock ? 'stock' : blk ? 'short:' + blk : 'make'; });
@@ -98,11 +98,11 @@ export function rateOf(m) {
   const pw = m.pw === undefined ? 1 : m.pw;
   if (m.kind === 'miner') return (m.ore ? 0.55 : 0.05) * pw;
   if (m.kind === 'furnace') return (m.fuel ? 2.5 : 1) / (RECIPE[m.rec] || RECIPE.iron).t * pw * (m.on || (m.inp['iron ore'] || 0) + (m.inp['lean ore'] || 0) + (m.inp['copper ore'] || 0) > 0.5 ? 1 : 0.4);
-  if (m.kind === 'assembler' && RECIPE[m.recipe]) return massOf(RECIPE[m.recipe].out) / RECIPE[m.recipe].t * pw * (m.on ? 1 : 0.3);
+  if (isBatch(m.kind) && recipeOf(m)) return massOf(recipeOf(m).out) / recipeOf(m).t * pw * (m.on ? 1 : 0.3);
   return 0;
 }
-const makes = m => m.kind === 'miner' ? Object.keys(m.out).filter(k => m.out[k] > 0.01).concat(m.oreId ? [m.oreId] : []) : m.kind === 'furnace' ? ((m.inp['copper ore'] || 0) > (m.inp['iron ore'] || 0) + (m.inp['lean ore'] || 0) + (m.inp.basalt || 0) ? ['copper'] : ['iron']) : m.kind === 'assembler' && RECIPE[m.recipe] ? Object.keys(RECIPE[m.recipe].out) : [];
-const takes = (m, id) => m.kind === 'assembler' ? !!RECIPE[m.recipe] && id in RECIPE[m.recipe].in : m.kind === 'pad' ? id === 'part' : m.kind === 'furnace' ? id === 'iron ore' || id === 'lean ore' || id === 'copper ore' : m.kind === 'assay station' ? id === 'rubble' : false;
+const makes = m => m.kind === 'miner' ? Object.keys(m.out).filter(k => m.out[k] > 0.01).concat(m.oreId ? [m.oreId] : []) : m.kind === 'furnace' ? ((m.inp['copper ore'] || 0) > (m.inp['iron ore'] || 0) + (m.inp['lean ore'] || 0) + (m.inp.basalt || 0) ? ['copper'] : ['iron']) : isBatch(m.kind) && recipeOf(m) ? Object.keys(recipeOf(m).out).slice(0, 1) : [];
+const takes = (m, id) => isBatch(m.kind) ? !!recipeOf(m) && id in recipeOf(m).in : m.kind === 'pad' ? id === 'part' : m.kind === 'furnace' ? id === 'iron ore' || id === 'lean ore' || id === 'copper ore' : m.kind === 'assay station' ? id === 'rubble' : false;
 // who a machine's output should go to: the nearest machine that consumes it, else the ship hold
 export function sinkFor(m, id) {
   let best = null, bd = 1e9; const [x, y] = mid(m);
@@ -118,9 +118,9 @@ function lineCells(a, bx0, bx1, by) {
 const routeKey = (m, dst) => `${m.x},${m.y}>${dst ? dst.x + ',' + dst.y : 'hold'}`;
 const sticky = new Map();        // a route that got its belt keeps it while both ends stand
 function planRoutes(nBots, powerFree) {
-  const out = [], hn = hive.near, hunted = creatures.some(c => c.agg);
+  const out = [], props = [], hn = hive.near, hunted = creatures.some(c => c.agg);
   for (const m of F.machines) {
-    if (m.kind !== 'miner' && m.kind !== 'furnace' && m.kind !== 'assembler') continue;
+    if (m.kind !== 'miner' && m.kind !== 'furnace' && !isBatch(m.kind)) continue;
     const ids = makes(m); if (!ids.length) continue; const id = ids[0], dst = sinkFor(m, id); if (!dst && !S.crash) continue;
     const bx0 = dst ? dst.x : PORT.x, bx1 = dst ? dst.x + dst.w : PORT.x + 1, by = dst ? dst.y : PORT.y, L = lineCells(m, bx0, bx1, by), [mx, my] = mid(m), tx = dst ? mid(dst)[0] : SHIP.hatch[0], ty = dst ? mid(dst)[1] : SHIP.hatch[1], key = routeKey(m, dst);
     let blocked = 0, missing = 0; if (L) for (const cx of L.cells) { const at = machineAt(cx, L.y), gh = BP.ghosts.find(g => g.kind === 'belt' && g.x === cx && g.y === L.y); if (at && at.kind === 'belt' && at.dir === L.dir) continue; if (gh) { missing++; continue; } if (at || !canPlace('belt', cx, L.y)) blocked++; else missing++; }
@@ -128,14 +128,20 @@ function planRoutes(nBots, powerFree) {
     const q = { dist, rise: L ? L.rise : 99, rate: rateOf(m), robots: nBots, blocked, danger, powerFree };
     let c = chooseRoute(q); if (!L && c.mode === 'belt') c = { ...c, mode: 'robot', why: 'robots: the two stand over each other, a belt needs a line between them' };
     if (sticky.has(key) && c.mode !== 'none' && L && !blocked) c = { ...c, mode: 'belt', why: sticky.get(key) };
-    if (c.mode === 'belt') { sticky.set(key, c.why.startsWith('belt') ? c.why : sticky.get(key)); if (missing && AUTO.on) for (const cx of L.cells) if (!machineAt(cx, L.y) && !BP.ghosts.some(g => g.x === cx && g.y === L.y) && canPlace('belt', cx, L.y)) { const g = addGhost('belt', cx, L.y, L.dir); g.auto = true; AUTO.laid++; events.emit('aiBelt', key); } }
-    out.push({ key, src: m, dst, item: id, x0: mx, y0: my, x1: tx, y1: ty, ...c, rate: q.rate, dist, done: c.mode === 'belt' && !missing, missing });
+    // round 7: the AI never lays a belt by itself. When a belt would win and is not there, the flow stays with the robots
+    // and the line is a proposal: drawn in blueprint mode only, and planned only when you take it (y)
+    let prop = null;
+    if (c.mode === 'belt') { sticky.set(key, c.why.startsWith('belt') ? c.why : sticky.get(key)); const open = L.cells.filter(cx => !machineAt(cx, L.y) && !BP.ghosts.some(g => g.x === cx && g.y === L.y));
+      if (missing && open.length && open.every(cx => canPlace('belt', cx, L.y))) { prop = { key, cells: open.map(cx => [cx, L.y, L.dir]), why: c.why, item: id }; props.push(prop); }
+      if (missing) c = { ...c, mode: 'robot', belt: true, why: BP.ghosts.some(g => g.kind === 'belt' && g.y === L.y && L.cells.includes(g.x)) ? `robots until the belt is laid: ${missing} cells to go` : `robots for now. proposed: ${c.why} (tab shows the line, y plans it)` }; }
+    out.push({ key, src: m, dst, item: id, x0: mx, y0: my, x1: tx, y1: ty, ...c, rate: q.rate, dist, done: c.mode === 'belt' && !missing, missing, proposed: !!prop });
   }
   for (const k of [...sticky.keys()]) if (!out.some(r => r.key === k)) sticky.delete(k);
+  AUTO.proposals = props; S.proposals = props;
   return out;
 }
 // is this machine's output on a finished belt? Then robots leave it alone.
-export const onBelt = m => AUTO.routes.some(r => r.src === m && r.done);
+export const onBelt = m => AUTO.routes.some(r => r.src === m && r.done) || (hasOutBelt(m) && !m.backed);
 
 // ---- power ---------------------------------------------------------------------------------------------------------
 function planPower() {
@@ -178,7 +184,7 @@ export function queueView(robots) {
     else if (g.have) why = robots.length ? 'kit on site: waits for a free robot' : 'kit on site: stand by it and the suit builds';
     else if (st === 'stock') why = robots.length ? (isLinked((g.x + 0.5) * TS, (g.y + 1) * TS) ? `${item} in stock: waits for a free robot` : 'outside the network: no robot takes orders here') : `${item} in stock: stand by it and the suit builds`;
     else if (st && st.startsWith('short:')) { const k = st.slice(6); why = `waits for ${k}: ${(AUTO.short[k] || 0).toFixed(ITEMS[k] && ITEMS[k].u === 'ea' ? 0 : 1)} ${ITEMS[k] && ITEMS[k].u === 'ea' ? '' : 'kg '}short, none loose or stored${k.endsWith('ore') || k === 'basalt' || k === 'lumen' ? ' (cut some, or place a miner)' : ''}`; }
-    else { const o = AUTO.orderOf && AUTO.orderOf(item), pj = S.printer.q.find(j => j.r === item); why = K.fab && K.fab.r === item ? `fabricator is making the kit: ${Math.ceil(K.fab.left)} s` : pj ? `the arm is printing the kit: ${Math.ceil(pj.left)} s` : o ? (g.kind === 'wall' ? 'iron: ' : '') + (o.note || 'ordered') : g.kind === 'wall' ? 'iron is on its way' : 'the kit is being made'; }
+    else { const o = AUTO.orderOf && AUTO.orderOf(item), pj = S.printer.q.find(j => j.r === item); why = pj ? `the arm is printing the kit: ${Math.ceil(pj.left)} s` : o ? (g.kind === 'wall' ? 'iron: ' : '') + (o.note || 'ordered') : g.kind === 'wall' ? 'iron is on its way' : 'the kit is being made'; }
     out.push({ g, n: ++ahead, kind: g.kind, why, auto: !!g.auto, manual: g.key !== undefined && g.key !== null });
   }
   return out;
@@ -192,4 +198,4 @@ export function drawAuto(b, time) {
   }
 }
 export function dumpAuto() { return { on: AUTO.on ? 1 : 0, st: [...sticky] }; }
-export function loadAuto(o) { AUTO.on = o ? !!o.on : true; sticky.clear(); for (const [k, v] of (o && o.st) || []) sticky.set(k, v); AUTO.routes = []; AUTO.status = {}; AUTO.short = {}; AUTO.tick = 0; }
+export function loadAuto(o) { AUTO.proposals = []; S.proposals = []; AUTO.on = o ? !!o.on : true; sticky.clear(); for (const [k, v] of (o && o.st) || []) sticky.set(k, v); AUTO.routes = []; AUTO.status = {}; AUTO.short = {}; AUTO.tick = 0; }

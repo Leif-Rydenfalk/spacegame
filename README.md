@@ -1,4 +1,43 @@
-# spacegame, demo 1 (round 6: you start as a weak human, and the numbers are real)
+# spacegame, demo 1 (round 7: fixes from play, and one matter compiler)
+
+Round 7 is a small round: the eight fixes Leif asked for after playing round 6, and one rule about the world
+(`docs/ROUND7.md` sections 1 and 7; what is done and what is partial: `docs/ROUND7-STATUS.md`). Sections 2 to 6 of
+that file (depth layers, recycling, disassembly, the part tree) were not built.
+
+1. **Loose rock does not hurt you.** You died from stepping into a couple of rocks: your own running speed was
+   counted as the rock's. Rock is solid now and harmless to touch: small pieces are kicked aside, anything else you
+   step onto (0.55 m) or climb when you push into it (1.15 m), and a pile is something you walk over. Only an impact
+   hurts: a rock that is itself moving and meets you at more than 6 m/s, by its energy. A roof still kills.
+2. **The idle audit.** Twice a second every idle robot is asked why it takes none of the jobs that are open, by the
+   market's own rules. The answer is in the J window, on the HUD (open jobs, idle, idle beside doable work) and in
+   `docs/shots/play.json`. What it found was fixed; twenty minutes of play read zero.
+3. **Deconstruction.** The deconstruction planner is an item: drag a box and the robots take down what is in it
+   (machines, decks, plans; trees are felled) and bring the parts to stock. A machine comes down as its kit in the
+   condition it was in. Hold the right button on one machine to take it down by hand.
+4. **Belts like Factorio.** A belt is an item you hold: press, drag a path, let go. Along the row, then up or down
+   as a bucket lift; every cell shows its direction; a press beside a machine starts at its port; a loader stands
+   where a line meets a machine; lumps ride it. The AI never lays a belt: it proposes one, in blueprint mode, and Y
+   takes it.
+5. **Planners are items.** Blueprint, blueprint book, deconstruction planner, upgrade planner: in slots. A
+   blueprint copies an area with a dragged box and pastes it with a click.
+6. **The shaft rig hoists everything** to a collar bin at the surface; robots (or a belt) take it from there.
+   Nothing lies at the face.
+7. **Spoil.** Every stockpile is on the back layer: you walk past it, not through it. The AI sites the spoil heap
+   away from the base, and uses spoil first: a pad under a machine planned on bad ground, a berm on each side of the
+   base, backfill of an abandoned shaft.
+8. **Trees are hard to cut.** A kerf through a trunk costs what charring wood costs (93 pulses for half a metre;
+   the same slot in basalt is 7). Then the tree falls, as a rod about its foot, and lies; each log is one more cut.
+   Drones do it with a saw when you mark trees with the deconstruction planner.
+
+And **there is one matter compiler, the one on your arm**. The ship never had one: its hold has a machine shop (a
+CNC mill and lathe, a metal powder printer, a polymer printer, a solder bench), each a part of the wreck you can
+salvage, each with its own stock and its limits. The queue gives the arm only what nothing else can make (chips,
+the first furnace and assembler, a shaft rig), shows its queue first, and the next panel names the machine that would
+take the work off it.
+
+`node tools/play.mjs` plays all of that by real input for twenty game minutes, with the forest and the hive on.
+
+## Round 6: you start as a weak human, and the numbers are real
 
 Round 6 (Leif's words: `docs/ROUND6.md`, `docs/MINING.md`, `docs/SCIENCE.md`, `docs/SHIPS.md`, `docs/LASER-ENERGY.md`;
 what was built, what is partial and what moved to round 7: `docs/ROUND6-STATUS.md`). In short:
@@ -15,7 +54,8 @@ what was built, what is partial and what moved to round 7: `docs/ROUND6-STATUS.m
    too heavy for one drone go to a team, trips take several pickups, and a job nobody can take says why and is tried
    again another way. The hauler really searches for its way along the rock (A* on the surface shell); when it is
    stuck, out of power or cut off, the drones lift it home. You can queue anything, with or without material: it is an
-   order in the one queue, every producer bids for it, and what is missing becomes demand down to raw rock. Your
+   order in the one queue, every conventional producer bids for it (round 7: the arm only when there is none), and what
+   is missing becomes demand down to raw rock. Your
    inventory is the whole network: every stack with its place and the seconds a robot needs to bring it, and you place
    and craft from what is in reach. The AI opens stockpile zones (rubble yard, ore bin, rock pile, organics), tidies
    everything loose into them, and keeps an exact ledger; you can change any zone.
@@ -85,9 +125,9 @@ closes on itself, gravity points at the centre for every body, the camera turns 
 of the screen, you can walk or jet all the way round and come back to the wreck, the hive's main base is on the
 antipode, and the view zooms without a cut from the body to the whole disc with its limb of air. **And the base runs
 itself**: you place a frame, anything, anywhere, with no kit in your hands; the AI orders the kit, has it made by
-whatever can make it (the wreck's fabricator, a built assembler, the arm on your suit), has it carried and built by
+whatever can make it (a built assembler, the wreck's machine shop, the arm on your suit: round 7), has it carried and built by
 the robots, in a queue it orders by what helps the base expand and then by what you placed first, and that you can
-reorder. It moves everything else the same way: robots where that is enough, a conveyor it lays itself where the
+reorder. It moves everything else the same way: robots where that is enough, a conveyor it proposes (round 7: it used to lay it itself) where the
 route is worth one, and it says why. The rest of this file is round 3's text, updated where round 4 changed it.
 
 One page, two acts, feel first. Act 1 is a side-view survival and factory game on a dark, overgrown, bioluminescent
@@ -117,8 +157,8 @@ npm install        # Node 18+; three 0.170.0, vite 5.4.11, puppeteer-core (check
 npm run dev        # http://localhost:5200
 npm run build      # -> dist/ (one page, one bundle)
 npm run check      # headless: every scenario -> docs/shots/*.png, console errors, save round-trips, ?test=1, writes docs/CHECK.md
-node tools/ui-flow.mjs   # headless, real mouse and keys: inventory, arm, blueprint, the round 3 kit, placing, title, save, continue
-node tools/play.mjs      # headless, the new start played by hand (round 6): wake without the suit, the suit, the boot, scan, kerf, craft from reach, robots, a mining order with supports
+node tools/ui-flow.mjs   # headless, real mouse and keys: inventory, arm, blueprint, the round 3 kit, placing, the round 7 tools (belt path, planners, held right button), title, save, continue
+node tools/play.mjs      # headless, played by hand for twenty game minutes (round 7): the round 6 start, then rocks, the arm and the machine shop, a belt path, blueprint, deconstruction, the shaft rig, a tree, spoil, the idle audit
 node tools/probe.mjs '?act=surface&scenario=kerf' 'D.MINE.freed' out.png   # one page: an expression on the live state (D = surface.debug), a shot
 node tools/shot.mjs http://localhost:5200/ out-dir name='?act=surface'   # one shot of a running server (--dpr 2 --clip x,y,w,h)
 ```
@@ -140,6 +180,12 @@ it also names a slot (`&slot=name`, and `&continue=1` to load it).
 | `?act=surface&scenario=market&t=25` `rescue&t=13` `stockpile&t=70` `reach` | round 6: the task market in the AI window; a stuck hauler lifted; zones; the inventory with what is in reach |
 | `?act=surface&scenario=assay&t=40` `shaft&t=110` `supports&t=60` `collapse&t=14` | round 6: scan and assay; the shaft rig; planned supports; a roof coming down |
 | `?act=surface&scenario=wires&t=8` `needs` `fog` `deckrock&t=8` `knowledge` | round 6: wires, links and ranges; needs and the air pump; fog of war; rock on decks; the known slice of the planet |
+| `?act=surface&scenario=rockwalk&auto=1` `heap&auto=1` | **round 7**: over a pile of loose rock and back, unhurt; past the spoil heap, in front of it |
+| `?act=surface&scenario=idleaudit&t=40` `shop&t=12` | round 7: the idle audit in the J window; the arm's queue and the ship's machine shop |
+| `?act=surface&scenario=decon&t=14` `planners` `tools7` | round 7: the deconstruction planner at work; the four planners in their slots, a blueprint on the cursor; the tools to try by hand |
+| `?act=surface&scenario=belts&t=40` `propose&t=30` | round 7: a belt path with a lift and lumps riding it; the line the AI proposes and does not lay |
+| `?act=surface&scenario=collar&t=230` `spoil&t=260` | round 7: the shaft rig's bucket and collar bin; a berm, a ground pad, the spoil heap sited away |
+| `?act=surface&scenario=trees&auto=1` `felling&t=200` | round 7: the laser on a trunk; trees felled and cut into logs by the drones |
 | `./` | title screen; the game plays in the save slot `main` |
 | `?act=surface&scenario=reactor&auto=1` | the walk with 178 kg on the body |
 | `?act=surface&scenario=turret&auto=1` | the laser on its legs, the reactor set down on its cable, the antenna up, the AI firing on a stalker |
@@ -161,7 +207,7 @@ it also names a slot (`&slot=name`, and `&continue=1` to load it).
 | `?act=surface&scenario=antipode` | round 4: the far side: the mouth of the hive's main base |
 | `?act=surface&scenario=autobuild` | round 4: four frames placed with no kit anywhere; the AI has them made, carried and built (`&t=75`) |
 | `?act=surface&scenario=queue` | round 4: the same, with the AI window open: build queue, logistics, stock targets |
-| `?act=surface&scenario=conveyor` | round 4: a furnace and an assembler on level ground: the AI lays the belt; a far furnace gets robots (`&t=40`) |
+| `?act=surface&scenario=conveyor` | round 4, changed in round 7: a furnace and an assembler on level ground: the AI proposes the belt and does not lay it; robots carry (`&t=40`) |
 | `?act=surface&scenario=overhang` | round 4: ore under a ledge: the ground hauler walks in (`&t=9`) |
 | `?act=surface&scenario=targets` | round 4: the stock-target editor |
 | `?act=surface&scenario=fall` | **round 5**: a fall into a shaft with two decks in it: you land on the first (S drops you to the next) |
@@ -186,10 +232,10 @@ shots), `slot=name`, `continue=1`. `F1` in the game opens the dev menu with the 
 |---|---|
 | A/D move, W or Space jump, Shift sprint, hold Space in the air for the jetpack (in the suit; with the reactor on your back it only brakes the fall). **S** drop through the deck you stand on; at the wreck's torn tail **S** steps inside and **W** steps out | W main engines (Z lock full, X cut), A/D rotate, Q/E strafe, S retro (RCS) |
 | Mouse aim (the headlamp follows; the laser swings after it, late). **LMB**: with a placeable item on the cursor, place it; with nothing on the cursor, the ship laser in pulses (Shift fires past the sink's limit and burns the optics); on a machine, open it. **K** kerf / spall. **H** (hold) scan the spot under the cursor | LMB autocannon, RMB mining laser, wheel zoom (continuous, 0.01 m/px to 1e10 m/px) |
-| **RMB** take back: cancel a ghost, mark a machine to be taken apart (the suit does it within 4 m, robots anywhere), lift a deck; anywhere else, lay the selected soil, basalt or iron as ground | M map (local, planet system, star system), Tab focus (ship, target, depot), T target |
+| **RMB** take back: cancel a ghost, mark a machine to be taken apart (the suit does it within 4 m, robots anywhere), lift a deck; **held** on a machine within 8 m: your hands take it down now; anywhere else, lay the selected soil, basalt or iron as ground | M map (local, planet system, star system), Tab focus (ship, target, depot), T target |
 | **E** (or I) inventory and crafting: LMB move or drag, RMB split, Shift quick move; click a recipe to craft it into the inventory on the arm (Shift x5), click a queued job to cancel, RMB a placeable recipe to plan it. Only recipes whose inputs you have seen are shown | `,` `.` time (x2, x4 under thrust; x10 to x100,000 on rails), N prediction on/off |
-| 1-9 or wheel: hotbar slot. A slot with a machine, a belt or a deck in it puts that on the cursor. **Q** pipette: what is under the cursor goes on the cursor (the slot that holds it; in blueprint mode a plan if you hold none); on nothing, clears the cursor. **R** rotate (belts) | B hangar, P ascent autopilot (from the pad), O story log, F1 dev menu |
-| **Tab** (or B) blueprint mode, for planning. The hotbar stays; a dashed row above it lists everything you can make. LMB: what you hold is placed, what you do not hold becomes a ghost and an order for the AI. **T** drag a rectangle of ground for the robots to cut. Tab again leaves | |
+| 1-9 or wheel: hotbar slot. A slot with a machine, a belt or a deck in it puts that on the cursor. **Q** pipette: what is under the cursor goes on the cursor (the slot that holds it; in blueprint mode a plan if you hold none); on nothing, clears the cursor. **R** turn a belt (east, up, west, down), mirror a blueprint (Shift+R: next page of a book). A **belt** on the cursor: press and drag a path. A **planner** on the cursor: drag a box (a blueprint that holds something: click pastes it, Shift+drag copies again; deconstruction planner: Shift+drag unmarks) | B hangar, P ascent autopilot (from the pad), O story log, F1 dev menu |
+| **Tab** (or B) blueprint mode, for planning. The hotbar stays; a dashed row above it lists everything you can make. LMB: what you hold is placed, what you do not hold becomes a ghost and an order for the AI. **T** drag a rectangle of ground for the robots to cut. **Y** plans the belt the AI proposes. Tab again leaves | |
 | **F** use: in the wreck the locker (the suit), the hold, the bunk, the toilet, the tank, a part (salvage; Shift+F a part with a use; R repair); outside unbolt the laser, pull the reactor, open the hold; a machine, chest or cache, a terminal, an audio log, a lore stone; board the finished rocket | |
 | **X** set the reactor down / lift it. **G** stand the laser on its legs as a turret / take it back. **V** (hold) gather loose matter within reach. **Z** drop the selected stack | |
 | **C** combat mode (the laser; an empty or unusable hand punches; a round 2 gun if a dev scenario gave you one: RMB aim, R reload). **N** self-defence: always / in combat mode / off | |
@@ -202,6 +248,37 @@ is the inventory (Factorio), so use is **F**; the headlamp went from F to **L** 
 deconstruction was X in the old blueprint mode and is the right button. B and I still work as second keys for Tab and E.
 
 ## What is simulated
+
+Round 7:
+
+- **Rock against the body** (`collide.js`). A loose body is felt as the box it fills (its rotated half extents). Under
+  7 % of your weight and walked into: kicked aside. Otherwise: its top within 0.55 m of the feet is a step (taken at
+  4 m/s), within 1.15 m and pushed into is a climb (1.6 m/s, and the way on slows), higher is a wall. Standing on rock
+  is standing (you can jump from it). An impact needs the rock's own speed over 3 m/s and a closing speed over 6 m/s;
+  the damage is E / 6 at that closing speed. What lies in a stockpile (the back layer) touches nothing in front.
+- **The idle audit** (`robots.js`, `market.js` `whyNot`): after every auction, each idle robot against each open job
+  through the same rules (kind, fit, mass, speed, charge, danger, a team, reach). Counted: samples, samples with an
+  idle robot and an open job, with a job it could take, with only a retry timer in the way. Loose things that are
+  not a job yet are listed with the reason (too hot, set aside, outside the network, no room, kept for a berm).
+- **Belts** (`factory.js`). A belt has one of four directions; an item is on the cell it is in and moves the way that
+  cell runs, 1.5 m/s (fast belt 3), behind what is ahead of it, onto the next cell unless that runs head on. A
+  machine has two ports (the cells beside its foot): a belt that leads away takes its output, a belt that leads in
+  feeds it. A belt needs ground or a deck under it, or ground within 6 m (trestle legs). `beltPath` is the row and
+  then the lift; `snapPort` is the port a press or release belongs to.
+- **Planners** (`blueprint.js`). `copyArea`, `pasteBlueprint` (mirrored on R), `deconArea`, `upgradeArea`; what a
+  planner holds is `slot.d` and goes through the save with the inventory. A kit's condition is `slot.c`.
+- **The shaft rig** (`things.js`): bucket 25 kg (hoist line: skip 60 kg), 2.5 m/s, collar bin 400 kg.
+- **Spoil** (`spoil.js`): `pickSpoilSite` (pure), fills (`pad`, `berm`, `backfill`) that are terrain by the kilogram,
+  `stepSpoil` that plans them from what spoil there is. Animals climb steep ground at a third of their pace.
+- **Wood** (`physics.js` `WOOD`, `flora.js`): `kerfWoodJ(d) = d x 2 cm x slab x 650 kg/m3 x 6 MJ/kg / 0.35`; the
+  fall is `1.5 g / H x sin(angle)`; `logsOf` gives the logs of a trunk (70 % of the height, 1.2 m each, tapering).
+  A drone's saw feeds 2 cm/s with a notch first.
+- **The machine shop and the arm** (`items.js`, `supply.js`). Every recipe has the machine class that makes it
+  (`by`) and, when the ship's gear can make it instead, its class (`cls`: plate, fine, poly, elec). `toolCan`,
+  `toolRecipe` (the mill takes 20 % more stock and gives it back as swarf; the printer takes powder for bar),
+  `producersOf` (conventional producers only), `bidProducers` (the arm bids only when there is none), `yieldOf`
+  (chips: 70 % good, 3 % more with every run, 95 % at most), `armAdvice` (the next panel). In the wreck the tools
+  share 4 kW, work from the hold and are slowed by their damage.
 
 Round 5, robustness:
 
@@ -271,7 +348,7 @@ Round 5, robustness:
   with leftovers unloads into a store, not into your hands.
 - **Inventory and placing** (`blueprint.js`, `ui.js`). One slot holds one stack of one item. Machines, belts and
   decks are items with a recipe; the arm crafts them into the inventory (eight times slower than the machine that
-  specialises in it), the wreck's fabricator and assemblers make them for the base. The selected slot is the
+  specialises in it), assemblers (and, round 7, the wreck's machine shop: there is no fabricator) make them for the base. The selected slot is the
   cursor: LMB places within 8 m and takes one from the stack. In blueprint mode (Tab) the cursor can also be a plan
   picked from the dashed row, by Q, or by RMB on a recipe: if you hold the item the click places it, if not it puts
   down a ghost (a blue hologram in a dashed frame with corner marks, an amber dot once its item is on site), which
@@ -322,7 +399,7 @@ Round 4, the automation loop (`auto.js`, `supply.js`, `robots.js`):
   order up, down or to the front, and a cancel.
 - **Every means.** `planAll` (pure, tested) meets the queue's kits first and the stock targets second from what is
   in stock; what is missing is ordered from the best producer that stands: the machine that specialises in the
-  recipe; else the wreck's fabricator, which works straight from the ship hold, three times slower; else the arm on
+  recipe; else (round 7: there is no fabricator) a tool of the wreck's machine shop that can make it, from the hold; else the arm on
   the suit, eight times slower. If the hold lacks the inputs and the suit holds them, the arm gets the job. Each
   producer's inputs become demand in turn, down to raw matter; what nobody has is named as the bottleneck. What an
   earlier order still waits for is kept for it: a cheaper, later order does not eat the iron first. Robots carry the
@@ -331,7 +408,8 @@ Round 4, the automation loop (`auto.js`, `supply.js`, `robots.js`):
   by `chooseRoute` (pure, tested): robots (trip time there and back at loaded speed, 60 kg a trip, the share of the
   fleet the flow would take, watt-hours per kilogram) against a belt (cells to build, iron, 40 W a cell, whether the
   line between is level and free, whether a hive is awake beside it, whether the grid has the power). When the belt
-  wins the AI queues the belt frames itself; they go through the same queue; a finished belt takes the flow and the
+  wins the AI proposes it (round 7: it no longer queues belt frames itself; the line is drawn in blueprint mode and Y
+  plans it); a finished belt takes the flow and the
   robots leave it alone. A belt that ends at the wreck's intake feeds the hold. The reason for every choice is on
   the HUD and in the window; robot routes are drawn as moving marks.
 - **The ground hauler.** The wreck releases two drones and one six-legged hauler. It walks the surface it holds on
@@ -434,7 +512,7 @@ From round 2, unchanged unless noted:
   reactor are), the ship hold, every loose body, stock targets, machines and their buffers, chests, blueprints,
   robots and their loads, kills, site state, hive alert, pollution, story beats seen, and the space state.
   `src/save.js` is the only module that touches storage, through an adapter `{ load(slot), save(slot, blob), list() }`
-  and a versioned schema: version 5 (round 5 adds decks, the seen-items list and the shape and pose of loose bodies; a version 4 save loads: `tools/fixtures/save-v4.json` is one, written by the round 4 build, and the check loads it), with migrations from round 2's version 2 (the laser drill item becomes the
+  and a versioned schema: version 7 (round 7: the machine shop in place of the fabricator, planners and kit condition on slots, fills, trees being cut, the arm's record; version 6 was round 6; a version 6 save loads: `tools/fixtures/save-v6.json`). Version 5 (round 5 adds decks, the seen-items list and the shape and pose of loose bodies; a version 4 save loads: `tools/fixtures/save-v4.json` is one, written by the round 4 build, and the check loads it), with migrations from round 2's version 2 (the laser drill item becomes the
   kit on your back; tested) and round 3's version 3 (a flat world maps onto the planet: x is still metres from the
   crash site, edited chunks are folded onto the circle).
 - Death: until you build the bio-printer, dying restarts you at the crash site; once it exists you respawn there.
@@ -457,6 +535,7 @@ From round 2, unchanged unless noted:
 targets, particles), `src/items.js` (items, inventories, recipes, the arm), `src/icons.js`, `src/ui.js`,
 `src/save.js`, `src/story.js`, `src/audio.js`, `src/hud.js`, `src/test.js`.
 Round 6: `src/surface/physics.js` (every number: reactor, laser, sink, rock energies, ablation, the punch, movers, build and craft energy, wire), `suit.js` (the exosuit, the needs), `wreck.js` (frame, volumes, parts, the interior), `geology.js` (composition, estimates, cut-off), `mine.js` (rock lumps, kerfs and blocks, spans, supports, collapse), `things.js` (assay station, shaft rig, pump and filters, sensors, furniture), `market.js` (the auction, batching, the log), `gnav.js` (the hauler's path search), `stock.js` (zones, the ledger, reach), `fog.js` (sensors, the scan, data, what is known), `net.js` (wires, links, ranges), `collide.js` (bodies against loose rock, rock on decks), `next.js` (stages, the next panel).
+Round 7: `src/surface/spoil.js` (the spoil heap's site, pads, berms, backfill), and round 7 parts of `collide.js` (rock against the body), `robots.js` (the idle audit, deck and tree jobs), `factory.js` (belts with direction, ports, loaders), `blueprint.js` (belt paths, the planners, condition), `things.js` (the collar bin, the shop machines), `flora.js` (kerf, fall, logs), `supply.js` and `items.js` (the machine shop, the arm), `next.js` (`armAdvice`).
 `src/surface/`: `gen.js` (pure generation, the planet's size and seam), `planet.js` (charts, Cartesian maps, the
 camera's map), `auto.js` (the AI's planner: queue, demand, routes, power), `world.js` (density field, brushes,
 queries), `terrain.js` (shader),
@@ -468,8 +547,8 @@ reactor, turret, cables, the wreck), `matter.js` (loose bodies), `supply.js` (st
 `ruins-gen.js`, `hive-gen.js`, `base-gen.js`, `sites.js`, `factory.js`, `blueprint.js` (placing, ghosts, blueprint
 mode), `layers.js` (decks), `robots.js`, `nav.js` (the drones' path search).
 `src/space/*` (orbit, ship, belt, combat, view). `tools/check.mjs`, `tools/ui-flow.mjs`, `tools/play.mjs`,
-`tools/shot.mjs`, `tools/probe.mjs` (one page, one expression on the live state, one shot), `tools/fixtures/save-v4.json` and `save-v5.json` (saves written by the round 4 and round 5 builds, loaded by the check).
-Plan, decisions and lore notes: `PLAN.md`. Leif's asks: `docs/ROUND6.md` (with `MINING.md`, `SCIENCE.md`, `SHIPS.md`, `LASER-ENERGY.md`; status in `ROUND6-STATUS.md`), `docs/ROUND5.md`, `docs/ROUND4.md`, `docs/ROUND3.md`. Check result and proof shots:
+`tools/shot.mjs`, `tools/probe.mjs` (one page, one expression on the live state, one shot), `tools/fixtures/save-v4.json`, `save-v5.json` and `save-v6.json` (saves written by the round 4, 5 and 6 builds, loaded by the check).
+Plan, decisions and lore notes: `PLAN.md`. Leif's asks: `docs/ROUND7.md` (status in `ROUND7-STATUS.md`), `docs/ROUND6.md` (with `MINING.md`, `SCIENCE.md`, `SHIPS.md`, `LASER-ENERGY.md`; status in `ROUND6-STATUS.md`), `docs/ROUND5.md`, `docs/ROUND4.md`, `docs/ROUND3.md`. Check result and proof shots:
 `docs/CHECK.md`, `docs/shots/`.
 
 ## Licence
@@ -477,6 +556,18 @@ Plan, decisions and lore notes: `PLAN.md`. Leif's asks: `docs/ROUND6.md` (with `
 Apache-2.0, see `LICENSE`. Dependencies: three (MIT), vite (MIT, build only), puppeteer-core (Apache-2.0, check only).
 
 ## Cut or simplified (said plainly)
+
+Round 7 (more in `docs/ROUND7-STATUS.md`):
+
+- A berm slows an animal, it does not stop it. There is no rubble wall with a gate, and no general second layer you
+  can step back into: only stockpiles are on the back layer.
+- The AI's belt proposal is a straight line on one row between two machines, as its own belts were.
+- A loader is drawn at a port and is not an item; there are no splitters; a chest does not unload onto a belt.
+- The shop tools' rates are on the game's clock (the 36-minute day is 40 to 1); the assembler and the arm still run
+  at round 6's 12 kJ/kg. Tooling (moulds, masks, jigs) is not an item. No chip line can be built.
+- A falling tree meets the ground, not loose rock or machines, and a trunk that lies is not an obstacle.
+- The play run is given a crate of metal (70 kg of iron, 8 of copper) once the furnace stands, so that it fits in
+  twenty minutes; `tools/play.mjs` says so at its head.
 
 Round 5:
 
@@ -521,7 +612,7 @@ Round 4:
   between; it does not grade terrain for a belt, and it does not take a belt up again when a flow dies.
 - The route model uses nominal rates (a furnace's smelting rate, an assembler's batch mass per batch time), not a
   measured throughput; danger is one test (an awake hive within 70 m of the line).
-- The power grid is reach-based (26 m from node to node), not cabled; the wreck's fabricator is not on it.
+- The power grid is reach-based (26 m from node to node), not cabled; the wreck's shop tools are not on it (they share the wreck's 4 kW bus).
 - The ground hauler follows the surface greedily and tries the other way round when it makes no way; it has no path
   search, does not build, and can be beaten by a maze. Drones still fly over.
 - Mining raw ore is still yours (the laser) or a miner's: the AI names the shortage, it does not go and cut rock.

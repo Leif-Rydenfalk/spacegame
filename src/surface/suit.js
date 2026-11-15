@@ -55,10 +55,13 @@ export function suitHit(d) {
   if (!EXO.on) return d * 2.2;                 // easily hurt
   const st = suitStats(), through = d * (1 - st.armour);
   EXO.cond = Math.max(0, EXO.cond - d * 0.0012); EXO.wear.actuators = Math.max(0.05, wearOf('actuators') - d * 0.0018);
+  // round 7: the matter compiler is in the forearm, and it is the only one there is. A hard blow can reach it: it prints
+  // slower as it is damaged, and under 15 % not at all. Nothing in the wreck replaces it; a repair mends it part of the way.
+  if (d > 12) { const a0 = EXO.arm === undefined ? 1 : EXO.arm; EXO.arm = Math.max(0, a0 - (d - 12) * 0.004); if (a0 - EXO.arm > 0.03 || (a0 > 0.15 && EXO.arm <= 0.15)) { EXO.history.push([Math.round(G.time), `matter compiler hit: ${(EXO.arm * 100).toFixed(0)} %`]); events.emit('armDamaged', { arm: EXO.arm }); S.say(EXO.arm <= 0.15 ? 'the matter compiler in the arm is down. it is the only one: nothing here can replace it. repair the suit' : `the matter compiler took the blow: it runs at ${(EXO.arm * 100).toFixed(0)} %. there is no other`, 6); } }
   if (EXO.cond <= 0) { EXO.on = false; EXO.history.push([Math.round(G.time), 'frame failed']); events.emit('suitBroke'); S.say('the exosuit has failed: you are on your own legs', 5); }
   return through;
 }
-export function repairSuit(k = 1) { EXO.cond = Math.min(1, EXO.cond + 0.25 * k); EXO.wear.actuators = Math.min(1, wearOf('actuators') + 0.3 * k); EXO.history.push([Math.round(G.time), 'repaired']); }
+export function repairSuit(k = 1) { if (EXO.arm !== undefined && EXO.arm < 0.9) EXO.arm = Math.min(0.9, EXO.arm + 0.2 * k); EXO.cond = Math.min(1, EXO.cond + 0.25 * k); EXO.wear.actuators = Math.min(1, wearOf('actuators') + 0.3 * k); EXO.history.push([Math.round(G.time), 'repaired']); }
 export function suitOn() { EXO.on = true; EXO.history.push([Math.round(G.time), 'put on']); if (BOOT.t < 0) BOOT.t = 0; events.emit('suitOn'); }
 // the needs, one step. ctx: { exert 0..1, inAir: breathable air round you, o2 kg in the tank, dt }. Returns { o2: kg
 // breathed from the tank, hurt: damage per second, slow: speed factor }
@@ -73,10 +76,10 @@ export function stepNeeds(dt, ctx) {
 export const needWorst = () => { const N = NEEDS, l = [['hungry', N.food], ['thirsty', N.water], ['tired', N.sleep], ['needs the toilet', 1 - N.toilet]].sort((a, b) => a[1] - b[1])[0]; return l[1] < 0.25 ? l[0] : ''; };
 // is a plant or an animal safe to eat? Unknown until it has been scanned; then it is true or false for the species.
 export const edibleOf = key => NEEDS.edible[key];
-export function resetSuit(on) { EXO.on = !!on; EXO.cond = 1; EXO.slots = { ...SLOTS0 }; EXO.wear = {}; EXO.history = []; EXO.water = 0; EXO.pinned = false; BOOT.t = on ? 99 : -1; BOOT.done = !!on; BOOT.shown = on ? BOOT_LINES.length : 0; Object.assign(NEEDS, { food: 0.8, water: 0.75, sleep: 0.85, toilet: 0.25, asleep: 0, edible: {} }); }
-export function dumpSuit() { const f = v => +v.toFixed(4); return { on: EXO.on ? 1 : 0, id: EXO.id, cond: f(EXO.cond), slots: { ...EXO.slots }, wear: Object.fromEntries(Object.entries(EXO.wear).map(([k, v]) => [k, f(v)])), pin: EXO.pinned ? 1 : 0, hist: EXO.history.slice(-24), water: f(EXO.water), boot: BOOT.done ? 1 : 0, needs: [f(NEEDS.food), f(NEEDS.water), f(NEEDS.sleep), f(NEEDS.toilet)], edible: { ...NEEDS.edible } }; }
+export function resetSuit(on) { EXO.arm = 1; EXO.on = !!on; EXO.cond = 1; EXO.slots = { ...SLOTS0 }; EXO.wear = {}; EXO.history = []; EXO.water = 0; EXO.pinned = false; BOOT.t = on ? 99 : -1; BOOT.done = !!on; BOOT.shown = on ? BOOT_LINES.length : 0; Object.assign(NEEDS, { food: 0.8, water: 0.75, sleep: 0.85, toilet: 0.25, asleep: 0, edible: {} }); }
+export function dumpSuit() { const f = v => +v.toFixed(4); return { on: EXO.on ? 1 : 0, id: EXO.id, cond: f(EXO.cond), slots: { ...EXO.slots }, wear: Object.fromEntries(Object.entries(EXO.wear).map(([k, v]) => [k, f(v)])), pin: EXO.pinned ? 1 : 0, hist: EXO.history.slice(-24), water: f(EXO.water), boot: BOOT.done ? 1 : 0, arm: f(EXO.arm === undefined ? 1 : EXO.arm), needs: [f(NEEDS.food), f(NEEDS.water), f(NEEDS.sleep), f(NEEDS.toilet)], edible: { ...NEEDS.edible } }; }
 export function loadSuit(o) {
   resetSuit(true); if (!o) return;
-  EXO.on = !!o.on; EXO.id = o.id || EXO.id; EXO.cond = o.cond; EXO.slots = { ...SLOTS0, ...o.slots }; EXO.wear = { ...o.wear }; EXO.pinned = !!o.pin; EXO.history = (o.hist || []).slice(); EXO.water = o.water || 0;
+  EXO.on = !!o.on; EXO.id = o.id || EXO.id; EXO.cond = o.cond; EXO.slots = { ...SLOTS0, ...o.slots }; EXO.wear = { ...o.wear }; EXO.pinned = !!o.pin; EXO.history = (o.hist || []).slice(); EXO.water = o.water || 0; EXO.arm = o.arm === undefined ? 1 : o.arm;
   BOOT.done = !!o.boot; BOOT.t = o.boot ? 99 : -1; BOOT.shown = o.boot ? BOOT_LINES.length : 0; [NEEDS.food, NEEDS.water, NEEDS.sleep, NEEDS.toilet] = o.needs || [0.8, 0.75, 0.85, 0.25]; NEEDS.edible = { ...(o.edible || {}) }; NEEDS.asleep = 0;
 }

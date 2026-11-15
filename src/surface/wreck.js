@@ -33,7 +33,7 @@ export const VOLUMES = [
 // what a use is filled with: [name, kg, w, h, where (0 floor, 1 wall, 2 ceiling), item it is, n of it, scrap { iron, copper } fractions, use]
 const FILL = {
   'engine bay': [['combustion chamber', 46, 0.55, 0.6, 0, null, 0, { iron: 0.8, copper: 0.1 }], ['turbopump', 22, 0.3, 0.3, 1, 'turbopump', 1, { iron: 0.7, copper: 0.2 }], ['turbopump', 22, 0.3, 0.3, 2, 'turbopump', 1, { iron: 0.7, copper: 0.2 }], ['feed lines', 7, 0.5, 0.08, 2, null, 0, { copper: 0.8 }]],
-  cargo: [['fabricator', 60, 0.42, 0.9, 0, null, 0, { iron: 0.6, copper: 0.2 }, 'fab'], ['suit locker', 16, 0.34, 1.5, 0, null, 0, { iron: 0.9 }, 'locker'], ['hold racks', 30, 0.5, 1.1, 0, null, 0, { iron: 0.9 }, 'hold']],
+  cargo: [['cnc mill', 60, 0.42, 0.9, 0, 'cnc mill', 1, { iron: 0.6, copper: 0.2 }, 'shop'], ['suit locker', 16, 0.34, 1.5, 0, null, 0, { iron: 0.9 }, 'locker'], ['hold racks', 30, 0.5, 1.1, 0, null, 0, { iron: 0.9 }, 'hold']],
   tank: [['water tank', 14, 0.5, 1.2, 0, null, 0, { iron: 0.8 }, 'tank'], ['wiring loom', 4, 0.6, 0.06, 2, 'wiring loom', 1, { copper: 0.7 }]],
   'reactor bay': [['power bus', 9, 0.16, 0.9, 1, 'wiring loom', 2, { copper: 0.8 }], ['coolant pump', 9, 0.26, 0.26, 0, 'pump', 1, { iron: 0.6, copper: 0.3 }], ['wiring loom', 4, 0.8, 0.06, 2, 'wiring loom', 1, { copper: 0.7 }]],
   'life support': [['air pump', 9, 0.3, 0.34, 0, 'pump', 1, { iron: 0.6, copper: 0.3 }, 'air'], ['air filter', 2, 0.14, 0.3, 1, 'air filter', 1, { iron: 0.5 }], ['air filter', 2, 0.14, 0.3, 1, 'air filter', 1, { iron: 0.5 }], ['controller', 1.5, 0.16, 0.12, 1, 'controller', 1, { copper: 0.5 }]],
@@ -41,6 +41,7 @@ const FILL = {
   computer: [['computer core', 11, 0.36, 1.0, 0, null, 0, { iron: 0.4, copper: 0.3 }, 'core'], ['data rack', 3, 0.2, 0.5, 1, 'ssd', 2, { copper: 0.4 }], ['antenna feed', 4, 0.5, 0.06, 2, 'wiring loom', 1, { copper: 0.7 }]],
   cockpit: [['console', 5, 0.3, 0.3, 0, 'pcb', 2, { copper: 0.4, iron: 0.3 }], ['pilot seat', 7, 0.24, 0.55, 0, 'seat', 1, { iron: 0.8 }], ['hull cameras', 1.6, 0.14, 0.1, 2, 'camera', 2, { copper: 0.4 }]],
 };
+const SHOP_SAY = { 'cnc mill': 'the mill and lathe: bar and plate in, parts up to 15 kg out, a fifth lost as swarf.', 'metal printer': 'the powder-bed printer: metal powder in, small precise parts out, slowly; nothing over 3 kg.', 'polymer printer': 'the polymer printer: pellets in, housings and filters out.', 'solder bench': 'the solder and rework bench: it puts chips on boards. it cannot make a chip.' };
 export const WRECK = { parts: [], inside: false, lit: 0, atm: { p: 1, o2: 0.21, ok: true }, near: null, cut: 0, marked: new Set(), step: 0 };
 // pure: the components of one volume, laid out along it. seed makes the crash damage.
 export function fill(v, vi, seed = 7) {
@@ -58,6 +59,9 @@ export function wreckReset(seed = G.seed) {
   WRECK.parts = []; VOLUMES.forEach((v, vi) => { for (const p of fill(v, vi, seed)) { p.id = WRECK.parts.length; WRECK.parts.push(p); } });
   // the skin: plates along the top between the ribs
   for (let i = 0; i < FRAME.ribs.length - 1; i++) { const a = FRAME.ribs[i], b = FRAME.ribs[i + 1]; WRECK.parts.push({ id: WRECK.parts.length, name: 'hull plate', vol: 'skin', lx: (a + b) / 2, ly: HULL.ceil + 0.03, w: b - a - 0.04, h: 0.07, kg: 15, cond: +clamp(1 - (0.2 + 0.7 * hash(i, seed, 502)) * (i < 2 ? 1 : 0.5), 0.05, 1).toFixed(3), item: 'hull plate', n: 1, scrap: { iron: 0.9 }, use: null, gone: false }); }
+  // round 7: the rest of the ship's machine shop (the mill stands in the hold, where round 6 had a "fabricator"). They are
+  // added after everything else so the parts a saved game counts by their place keep their place.
+  for (const [name, vol, lx, ly, w, h, kg, dmg, scrap] of [['metal printer', 'reactor', -0.5, HULL.keel + 0.36, 0.4, 0.72, 45, 0.3, { iron: 0.5, copper: 0.2 }], ['polymer printer', 'hold', -2.9, 1.34, 0.26, 0.34, 18, 0.35, { iron: 0.4, copper: 0.1 }], ['solder bench', 'hold', -2.28, 1.36, 0.4, 0.2, 12, 0.35, { iron: 0.5, copper: 0.3 }]]) { const i = WRECK.parts.length; WRECK.parts.push({ id: i, name, vol, lx, ly, w, h, kg, cond: +clamp(1 - dmg * (0.55 + 0.9 * hash(i, seed, 504)), 0.03, 1).toFixed(3), item: name, n: 1, scrap, use: 'shop', gone: false }); }
   WRECK.inside = false; WRECK.lit = 0; WRECK.atm = { p: 1, o2: 0.21, ok: true }; WRECK.marked = new Set(); WRECK.cut = 0;
 }
 const ct = Math.cos(HULL.tilt), st = Math.sin(HULL.tilt);
@@ -111,10 +115,10 @@ export function wreckUse(shift, repair) {
     if (p.use === 'tank') { act('drink, and fill the suit', 1.6, x, y, () => { NEEDS.water = 1; if (EXO.on) EXO.water = suitStats().packL; events.emit('drank'); }); return true; }
     if (p.use === 'air') { S.say(`air pump: ${WRECK.atm.ok ? 'holding ' + (WRECK.atm.o2 * 100).toFixed(0) + ' % oxygen in the forward section' : 'not holding'}. shift+f takes it out`, 3); return true; }
     if (p.use === 'core') { S.say('the computer core: the ai runs here. it stays', 2.5); return true; }
-    if (p.use === 'fab') { S.say('the fabricator: the ship\'s matter compiler. it makes what the queue asks for from the hold', 3); return true; }
+    if (p.use === 'shop') { S.say(SHOP_SAY[p.name] + (p.cond < 0.4 ? ' it is broken: r repairs it' : '') + '   shift+f takes it out', 4); return true; }
     return false;
   }
-  if (p.use === 'core' || p.use === 'hold' || p.use === 'fab' || p.use === 'locker') { S.say(`the ${p.name} stays in the ship`, 2); return true; }
+  if (p.use === 'core' || p.use === 'hold' || p.use === 'locker') { S.say(`the ${p.name} stays in the ship`, 2); return true; }
   if (!suited && p.kg > 25) { S.say(`${p.kg} kg: not without the exosuit`, 2.5); return true; }
   act(`salvage the ${p.name}`, salvageTime(p.kg, suited), x, y, () => take(p, S.inv)); return true;
 }
@@ -130,7 +134,7 @@ export function wreckHint() {
   if (p.use === 'tank') return 'f  drink, and fill the suit\'s water';
   if (p.use === 'air') return `air pump (${c})   f  status   shift+f  take it out`;
   if (p.use === 'core') return 'the computer core: the ai runs on this';
-  if (p.use === 'fab') return 'the fabricator: the ship\'s own matter compiler';
+  if (p.use === 'shop') return `${p.name} (${c})${p.cond < 0.4 ? ': broken   r  repair' : ': works from the hold'}   f  what it does   shift+f  take it out`;
   const y = salvageYield(p).map(([k, n]) => `${k} ${ITEMS[k].u === 'ea' ? 'x' + n : n + ' kg'}`).join(', ');
   return `f  salvage the ${p.name} (${c}): ${y}, ${salvageTime(p.kg, EXO.on).toFixed(0)} s${p.cond < 0.97 ? '   r  repair' : ''}`;
 }
@@ -175,7 +179,12 @@ export function drawInterior(b, time, a) {
       if (!EXO.on) { R(p.lx, p.ly + 0.28, 0.2, 0.42, mul(C.suit, 1.5), 1, 2, 1, 2); R(p.lx, p.ly + 0.6, 0.16, 0.16, mul(C.suit, 1.8), 1, 2, 1, 3); R(p.lx - 0.04, p.ly - 0.25, 0.07, 0.6, mul(C.suit, 1.3), 1, 2, 1); R(p.lx + 0.05, p.ly - 0.25, 0.07, 0.6, mul(C.suit, 1.3), 1, 2, 1); R(p.lx + 0.02, p.ly + 0.61, 0.07, 0.035, mul(C.amber, 1.2 + Math.sin(time * 2.2)), 1, 0, 2); } }
     else if (p.name === 'computer core') { R(p.lx, p.ly, p.w, p.h, col(mul(C.dark, 1.4)), 1, 0, 1, sd); for (let i = 0; i < 6; i++) R(p.lx - 0.1 + (i % 2) * 0.2, p.ly - 0.34 + Math.floor(i / 2) * 0.3, 0.12, 0.03, mul(i % 3 ? C.cyan : C.amber, lit * (1 + Math.sin(time * (3 + i) + i))), 1, 0, 2); }
     else if (p.name === 'water tank') { R(p.lx, p.ly, p.w, p.h, col(mul(C.hull, 0.3)), 1, 2, 1, sd); R(p.lx, p.ly - 0.3, p.w + 0.03, 0.04, col(mul(C.steel, 0.8)), 1, 0, 1); R(p.lx, p.ly + 0.3, p.w + 0.03, 0.04, col(mul(C.steel, 0.8)), 1, 0, 1); }
-    else if (p.name === 'fabricator') { R(p.lx, p.ly, p.w, p.h, col(mul(C.steel, 0.5)), 1, 0, 1, sd); R(p.lx, p.ly + 0.12, p.w - 0.1, 0.3, [0.008, 0.01, 0.012], 1, 0, 1); R(p.lx, p.ly + 0.12, p.w - 0.16, 0.03, mul(C.amber, 0.3 + lit * (S.fabOn ? 3 + Math.sin(time * 30) : 0.6)), 1, 0, 2); }
+    else if (p.use === 'shop') { const run = S.shopOn && S.shopOn[p.name] ? 1 : 0;       // the machine shop: each tool reads as what it is, and shows when it works
+      if (p.name === 'cnc mill') { R(p.lx, p.ly - 0.2, p.w, 0.5, col(mul(C.steel, 0.5)), 1, 0, 1, sd); R(p.lx - 0.13, p.ly + 0.2, 0.12, 0.5, col(mul(C.steel, 0.62)), 1, 0, 1, sd + 1); R(p.lx, p.ly + 0.42, p.w - 0.06, 0.05, col(mul(C.steel, 0.9)), 1, 0, 1); const sx = p.lx + 0.04 + Math.sin(time * 1.7) * 0.08 * run; R(sx, p.ly + 0.28, 0.1, 0.2, col(C.dark), 1, 0, 1); R(sx, p.ly + 0.15, 0.03, 0.1, mul(C.steel, 1.4), 1, 0, 1, 0, run ? time * 30 : 0); }
+      else if (p.name === 'metal printer') { R(p.lx, p.ly, p.w, p.h, col(mul(C.hull, 0.3)), 1, 0, 1, sd); R(p.lx, p.ly + 0.08, p.w - 0.14, 0.26, [0.008, 0.01, 0.013], 1, 0, 1); if (run) R(p.lx + Math.sin(time * 9) * 0.1, p.ly + 0.02, 0.04, 0.04, [5, 3, 1.2], 1, 1, 2); }
+      else if (p.name === 'polymer printer') { R(p.lx, p.ly, p.w, p.h, col(mul(C.steel, 0.4)), 1, 0, 1, sd); R(p.lx, p.ly, p.w - 0.08, p.h - 0.1, [0.01, 0.012, 0.015], 1, 0, 1); R(p.lx + Math.sin(time * 2.3) * 0.06 * run, p.ly + 0.02, 0.06, 0.06, col(mul(C.amber, 0.7)), 1, 0, 1); }
+      else { R(p.lx, p.ly - 0.06, p.w, 0.05, col(mul(C.steel, 0.9)), 1, 0, 1, sd); R(p.lx - 0.08, p.ly - 0.02, 0.18, 0.025, [0.04, 0.2, 0.1], 1, 0, 1); R(p.lx + 0.1, p.ly + 0.06, 0.1, 0.03, mul(C.warm, 0.6 + 2.4 * run * lit), 1, 0, 2); }
+      R(p.lx + p.w / 2 - 0.05, p.ly + p.h / 2 - 0.05, 0.035, 0.035, mul(p.cond < 0.4 ? C.red : run ? C.acid : C.amber, lit * (run ? 2.5 + Math.sin(time * 20) : 1)), 1, 1, 2); }
     else if (p.name === 'hold racks') { for (let i = 0; i < 3; i++) R(p.lx, HULL.keel + 0.2 + i * 0.36, p.w, 0.04, col(mul(C.steel, 0.7)), 1, 0, 1, sd + i); for (let i = 0; i < 4; i++) R(p.lx - 0.14 + (i % 2) * 0.26, HULL.keel + 0.34 + Math.floor(i / 2) * 0.36, 0.2, 0.2, mul(C.concrete, 0.6 + 0.3 * hash(i, 4, 503)), 1, 0, 1, i); }
     else if (p.name === 'toilet') { R(p.lx, p.ly - 0.06, p.w, 0.26, col(mul(C.hull, 0.4)), 1, 2, 1, sd); R(p.lx - 0.08, p.ly + 0.12, 0.07, 0.24, col(mul(C.hull, 0.35)), 1, 0, 1); }
     else if (p.name === 'table') { R(p.lx, p.ly + p.h / 2 - 0.03, p.w, 0.05, col(mul(C.steel, 0.9)), 1, 0, 1, sd); R(p.lx, p.ly - 0.04, 0.05, p.h - 0.08, col(mul(C.steel, 0.6)), 1, 0, 1); }
@@ -193,5 +202,5 @@ export function drawSkin(b, time, a) { for (const p of WRECK.parts) if (p.vol ==
 export function dumpWreck() { return { parts: WRECK.parts.map(p => [p.gone ? 1 : 0, p.cond]), inside: WRECK.inside ? 1 : 0, o2: +WRECK.atm.o2.toFixed(4), marked: [...WRECK.marked] }; }
 export function loadWreck(o, seed) {
   wreckReset(seed); if (!o) return; if (!(o.parts || []).length) WRECK.parts = [];
-  (o.parts || []).forEach((q, i) => { const p = WRECK.parts[i]; if (p) { p.gone = !!q[0]; p.cond = q[1]; } }); WRECK.inside = !!o.inside; S.inside = WRECK.inside ? 'wreck' : null; WRECK.atm.o2 = o.o2 === undefined ? 0.21 : o.o2; WRECK.marked = new Set(o.marked || []); WRECK.cut = WRECK.inside ? 1 : 0; WRECK.lit = BOOT.done ? 1 : 0;
+  (o.parts || []).forEach((q, i) => { const p = WRECK.parts[i]; if (p) { p.gone = !!q[0]; p.cond = q[1]; } });       /* a version 6 save is three parts short: the printers and the bench it never listed are there, as the crash left them */ WRECK.inside = !!o.inside; S.inside = WRECK.inside ? 'wreck' : null; WRECK.atm.o2 = o.o2 === undefined ? 0.21 : o.o2; WRECK.marked = new Set(o.marked || []); WRECK.cut = WRECK.inside ? 1 : 0; WRECK.lit = BOOT.done ? 1 : 0;
 }

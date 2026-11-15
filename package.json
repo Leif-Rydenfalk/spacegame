@@ -1,7 +1,7 @@
 {
   "name": "spacegame",
-  "version": "0.6.0",
-  "description": "spacegame demo 1, round 6: you wake without the suit, find it, and the one AI comes up; a task market of robots that bid, a ground hauler that finds its way and is lifted when stuck, queue-anything, stockpiles and a ledger you place from; a 2 MW reactor and a pulse laser limited by its heat sink, kerfs that free blocks, ablation, fists; composition fields with uncertainty, an assay station, a modular shaft rig, planned supports and collapse; a wreck of real parts you walk into, needs, fog of war, wires. One page, three.js",
+  "version": "0.7.0",
+  "description": "spacegame demo 1, round 7: fixes from play (loose rock is solid and harmless, an idle audit for the robots, a deconstruction planner, belts laid as paths, blueprints and planners as items, a shaft rig that hoists to a collar bin, spoil on a back layer and in berms, trees that cost real energy) and one matter compiler: the arm; the ship has a machine shop. On round 6: a weak human, one AI, a task market, real energy. One page, three.js",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",

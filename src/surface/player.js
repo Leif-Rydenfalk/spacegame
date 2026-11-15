@@ -23,7 +23,7 @@ import { EXO, BOOT, NEEDS, MASK, suitStats, suitHit, stepNeeds } from './suit.js
 import { breathable } from './wreck.js';
 import { FIST } from './physics.js';
 import { deckUnder, deckStep } from './layers.js';
-import { cursorKind, thingAt } from './blueprint.js';
+import { cursorKind, thingAt, toolSlot } from './blueprint.js';
 import { K, kitKg, hasLaser, hasReactor, drawReactor, drawLaser } from './kit.js';
 
 export const SUIT = { bat: 600, o2: 1.2, prop: 2.0, lampW: 15, rtgW: 40, o2Rate: 0.0012, jetRate: 0.18, gather: 28, reach: 1.7 };
@@ -114,7 +114,7 @@ export function stepPlayer(dt) {
   if (P.ground && (!ax || P.vx * ax < 0 || Math.abs(P.vx) > max)) P.vx -= Math.sign(P.vx) * Math.min(Math.abs(P.vx), (16 - 5 * mob.k) * dt);
   P.air = P.ground ? 0 : P.air + dt;
   const up = !ui && !busy && !P.noJump && NEEDS.asleep <= 0 && (input.key('w') || input.key(' ')); P.noJump = false;
-  let jumped = false; if (up && P.ground && P.stumble <= 0) { P.vy = mob.jump; P.ground = false; jumped = true; P.exert = Math.min(1, P.exert + 0.08 + mob.k * 0.15); P.rig.pv += 1.2; }
+  let jumped = false; if (up && P.ground && P.stumble <= 0) { P.vy = mob.jump; P.ground = false; jumped = true; P.onRock = 0; P.exert = Math.min(1, P.exert + 0.08 + mob.k * 0.15); P.rig.pv += 1.2; }
   let jet = false;
   if (!ui && !busy && (input.key(' ') || P.autoJet > 0) && !P.ground && P.air > (P.autoJet > 0 ? 0.05 : 0.22) && P.prop > 0 && mob.jet > 0) { jet = true; P.vy += mob.jet * dt; P.prop = Math.max(0, P.prop - SUIT.jetRate * dt); env.noise(P.x, P.y, 22); }
   if (P.autoJet > 0) P.autoJet -= dt; if (P.prop > st.prop) P.prop = st.prop;
@@ -125,7 +125,9 @@ export function stepPlayer(dt) {
   }
   audio.loop('engine', jet ? 0.35 : 0, 240);
   P.vy -= GRAV * dt; P.vy = Math.max(P.vy, -60);
-  const was = P.ground, vy0 = P.vy, drop = !ui && input.key('s'); let g = moveBody(dt, ax, drop);
+  const was = P.ground, drop = !ui && input.key('s'); let vy0 = P.vy; P.walkX = ax; let g = moveBody(dt, ax, drop);
+  // loose rock carries the body too (collide.js): standing on a block or a pile is standing
+  if (P.onRock > 0) { g = true; if (P.rockImp) { vy0 = Math.min(vy0, -P.rockImp); P.rockImp = 0; } }
   // walking down a slope the feet keep the ground: a short look under them, in the rock itself (decks are passed above)
   if (!g && was && !jumped && P.vy <= 0.5 && !drop) { for (let d = 0.03; d <= 0.24; d += 0.03) if (world.dens(P.x, P.y - d) > 0) { world.normal(P.x, P.y - d, nv); if (nv[1] > 0.7) { P.y -= d - 0.03; P.vy = Math.min(P.vy, 0); g = resolve(0) || true; } break; } }
   // and the last word: a body that gravity has not moved for a quarter of a second is held up by something, whatever
@@ -155,8 +157,10 @@ export function stepPlayer(dt) {
   // the arm's matter compiler is part of the suit. On the reactor's cable it has its 5 kW; on the suit's own bus it
   // has 0.4 kW and prints that much slower
   P.armW = !st.on ? 0 : K.reactor.state === 'carried' || (K.laser.reach && K.laser.state === 'held') || P.charging || P.onCable ? ARM_W : SUIT_BUS_W;
-  const done = st.on ? printerStep(S.printer, S.inv, dt * P.armW / ARM_W, P.bat, st.carry - inv.mass(S.inv) + 200) : null; if (!st.on && S.printer.q.length) S.printer.stall = 'the arm is on the suit';
-  if (done) { S.gain(done, 0.0001); audio.play('place'); events.emit('suitPrinted'); if (ITEMS[done].build) events.emit('firstMachinePrinted'); if (S.printer.over) { for (const k in S.printer.over) S.drop(k, S.printer.over[k]); S.printer.over = null; } }
+  const armK = EXO.arm === undefined ? 1 : EXO.arm, armOk = st.on && armK > 0.15;
+  const done = armOk ? printerStep(S.printer, S.inv, dt * P.armW / ARM_W * armK, P.bat, st.carry - inv.mass(S.inv) + 200) : null; if (!st.on && S.printer.q.length) S.printer.stall = 'the arm is on the suit'; else if (st.on && !armOk && S.printer.q.length) S.printer.stall = 'the matter compiler is down';
+  if (S.printer.failed) { S.say(`the arm's print of the ${S.printer.failed} came out wrong: the matter goes back in, the time is gone`, 4); events.emit('printFailed', S.printer.failed); S.printer.failed = null; audio.play('click'); }
+  if (done) { S.gain(done, 0.0001); audio.play('place'); events.emit('suitPrinted', done); const lj = S.printer.lastJob; if (lj && lj.ai === 'stock') { const r0 = RECIPE[done]; S.armOut = S.armOut || {}; for (const k in r0.out) if (k !== 'slag') S.armOut[k] = (S.armOut[k] || 0) + r0.out[k]; }       /* what the arm made on the network's order is the network's: a robot comes for it */ if (ITEMS[done].build) events.emit('firstMachinePrinted'); if (S.printer.over) { for (const k in S.printer.over) S.drop(k, S.printer.over[k]); S.printer.over = null; } }
   // hotbar
   if (!ui) { for (let i = 0; i < 9; i++) if (input.hit(String(i + 1))) { P.slot = i; S.plan = null; } if (input.wheel) { P.slot = (P.slot + (input.wheel > 0 ? 1 : 8)) % 9; S.plan = null; } }
   if (input.hit('l') && !ui) light.lamp.on = !light.lamp.on; if (!st.on) light.lamp.on = false;
@@ -166,7 +170,7 @@ export function stepPlayer(dt) {
   // the hands. With something placeable on the cursor the left button places it (blueprint.js); with nothing on it the
   // left button is the ship laser. The right button lays the selected soil, basalt or plate as ground, unless it is over
   // something it would remove instead. Z drops the selected stack.
-  const cur = combat ? null : cursorKind(), gx = Math.floor(S.mouse.x / TS), gy = Math.floor(S.mouse.y / TS);
+  const cur = combat ? null : cursorKind() || (toolSlot() ? 'planner' : null), gx = Math.floor(S.mouse.x / TS), gy = Math.floor(S.mouse.y / TS);       // a planner on the cursor is a tool in the hand: the left button is its box, not the laser
   const L = K.laser, laserOk = hasLaser() && !L.wait && !L.wrecked && L.frac >= 0.6; P.override = input.key('Shift');
   if (!ui && !busy && (input.down[0] || P.autoFire) && hasLaser() && !cur && !S.tool && (!combat || !wn) && !(P.autoFire && !input.down[0] && L.sinkJ > 2.0e6)) P.wantFire = true;
   // round 6 E: in combat mode a hand that has no laser, or a laser that cannot fire (sink full, reactor starved,
@@ -236,7 +240,7 @@ function defend(dt, ui, busy) {
 }
 // hold V: the hands take loose matter within reach into the suit, as fast as hands can, as much as the suit carries
 function gather(dt, st) {
-  const c = matter.near(P.x + P.face * 0.3, P.y + 0.5, SUIT.reach, q => !q.claim); if (!c) { P.gatherT = 0; return; }
+  const c = matter.near(P.x + P.face * 0.3, P.y + 0.5, SUIT.reach, q => !q.back); if (!c) { P.gatherT = 0; return; }       // your hand comes before a robot's claim; what lies in a stockpile is the stockpile's
   P.reach = { x: c.x, y: c.y }; if (c.temp > 0.7) { if (S.msgT <= 0) S.say('too hot to carry yet', 1.2); return; }
   const d = ITEMS[c.id]; P.gatherT += dt; let n = d.u === 'ea' ? (P.gatherT > 0.45 ? 1 : 0) : Math.min(c.n, SUIT.gather * (st && st.on ? 1 : 0.3) * dt / d.m); if (!n) return; if (d.u === 'ea') P.gatherT = 0;
   const left = S.add(c.id, n), got = n - left; if (got > 1e-9) { matter.take(c, got); S.gain(c.id, got); P.exert = Math.min(1, P.exert + dt * 0.15); if (Math.random() < dt * 6) audio.play('step'); events.emit('gathered', c.id); } else if (S.msgT <= 0) S.say(st && st.on ? 'the suit carries no more' : 'you can carry no more: about 60 kg, and 25 already slows you', 1.5);

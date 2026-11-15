@@ -73,7 +73,7 @@ async function boot() {
   }
   if (blob) { const d = save.apply(blob); started.surface = true; started.space = !!d.parts.space; G.act = d.act === 'space' && d.parts.space ? 'space' : 'surface'; G.loadedHash = blob.hash; G.reloadHash = save.hash(save.collect()); }
   save.slot = slot; save.last = performance.now(); G.paused = false;
-  for (let i = 0, n = Math.min(120, G.prewarm) * 120; i < n; i++) { G.time += DT; acts[G.act].step(DT); }
+  for (let i = 0, n = Math.min(420, G.prewarm) * 120; i < n; i++) { G.time += DT; acts[G.act].step(DT); }
   if (direct) requestAnimationFrame(frame);
 }
 boot();

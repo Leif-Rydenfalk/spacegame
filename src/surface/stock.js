@@ -15,19 +15,24 @@ import { F } from './factory.js';
 import { matter } from './matter.js';
 import { K, SHIP, isLinked } from './kit.js';
 import { droneSpeed } from './physics.js';
+import { spoilSiteX } from './spoil.js';
 
 export const STOCK = { zones: [], nextId: 1, reachS: 60, auto: true };
 // the zones the AI opens when something first needs one: [name, what it takes, where (m from the wreck), width, limit kg]
-export const AUTO_ZONES = [['ore bin', ['iron ore', 'lean ore', 'copper ore', 'lumen'], -16.2, 3, 1200], ['rubble yard', ['rubble'], -20.2, 3.4, 2500], ['rock pile', ['basalt', 'soil', 'slag', 'silicon'], -25.2, 5, 6000], ['organics', ['biomass', 'fibre', 'chitin', 'resin', 'ichor'], -29.6, 2.4, 600]];
+// round 7: every stockpile is on the back layer (what lies in one is drawn behind you and does not stand in your way),
+// and spoil has a heap of its own that the AI sites away from the base (spoil.js spoilSiteX): where = null.
+export const AUTO_ZONES = [['ore bin', ['iron ore', 'lean ore', 'copper ore', 'lumen'], -16.2, 3, 1200], ['rubble yard', ['rubble'], -20.2, 3.4, 2500], ['spoil heap', ['basalt', 'soil', 'slag'], null, 7, 12000], ['stores', ['silicon', 'swarf', 'metal powder', 'polymer'], -23.6, 2.2, 800], ['organics', ['biomass', 'fibre', 'chitin', 'resin', 'ichor', 'log'], -29.6, 3, 1500]];
 export function addZone(name, filter, x, w, limit, auto = false) { const z = { id: STOCK.nextId++, name, filter: filter.slice(), x0: +(x - w / 2).toFixed(2), x1: +(x + w / 2).toFixed(2), pri: 1, limit, auto }; STOCK.zones.push(z); return z; }
 export const zoneKg = z => { let s = 0; for (const c of matter.list) if (c.zone === z.id) s += c.kg; return s; };
 // the zone that takes this item: the highest priority one with room. make = let the AI open its own when none does.
 export function zoneFor(item, make = true) {
   let best = null; for (const z of STOCK.zones) if (z.filter.includes(item) && (!best || z.pri > best.pri) && zoneKg(z) < z.limit) best = z;
-  if (!best && make && STOCK.auto && S.crash) { const a = AUTO_ZONES.find(q => q[1].includes(item)); if (a && !STOCK.zones.some(z => z.name === a[0])) best = addZone(a[0], a[1], SHIP.x + a[2] + 9, a[3], a[4], true); }
+  if (!best && make && STOCK.auto && S.crash) { const a = AUTO_ZONES.find(q => q[1].includes(item)); if (a && !STOCK.zones.some(z => z.name === a[0])) { best = addZone(a[0], a[1], a[2] === null ? spoilSiteX(STOCK.ghosts ? STOCK.ghosts() : []) : SHIP.x + a[2] + 9, a[3], a[4], true); if (STOCK.onOpen) STOCK.onOpen(best); } }
   return best;
 }
-export const inZone = c => { if (!c.zone) return false; const z = STOCK.zones.find(q => q.id === c.zone); return !!z && z.filter.includes(c.id); };
+export const inZone = c => { if (!c.zone) return false; const z = STOCK.zones.find(q => q.id === c.zone); return !!z && z.limit > 0 && z.filter.includes(c.id); };       // a zone with no limit left is being emptied
+// a zone is gone: what lay in it is loose again, and back in the front layer
+export function removeZone(id) { const k = STOCK.zones.findIndex(q => q.id === id); if (k < 0) return; STOCK.zones.splice(k, 1); for (const c of matter.list) if (c.zone === id) { c.zone = 0; c.back = false; c.asleep = false; } }
 // where in a zone the next load is set down: spread along it
 export function zoneSpot(z) { const x = z.x0 + 0.4 + Math.random() * Math.max(0.2, z.x1 - z.x0 - 0.8), g = world.groundY(x, 12, 0, 40); return [x, (g === null ? 0 : g) + 1.3]; }
 // seconds for a robot to bring kg from (x, y) to you: the flight both ways at the speed that load allows, and the handling
@@ -46,5 +51,8 @@ export function reachable(item, L = ledger(), robots = 1) { let n = 0, best = nu
 export function dumpStock() { return { z: STOCK.zones.map(z => [z.id, z.name, z.filter, z.x0, z.x1, z.pri, z.limit, z.auto ? 1 : 0]), n: STOCK.nextId, r: STOCK.reachS }; }
 export function loadStock(o) { STOCK.zones = ((o && o.z) || []).map(q => ({ id: q[0], name: q[1], filter: q[2].slice(), x0: q[3], x1: q[4], pri: q[5], limit: q[6], auto: !!q[7] })); STOCK.nextId = (o && o.n) || 1; STOCK.reachS = (o && o.r) || 60; STOCK.auto = true; }
 export function drawZones(b, time, C, mul) {
-  for (const z of STOCK.zones) { const g = world.groundY((z.x0 + z.x1) / 2, 12, 0, 40) || 0; for (const x of [z.x0, z.x1]) { const gy = world.groundY(x, 12, 0, 40) ?? g; b.add(x, gy + 0.35, 0.05, 0.7, 0, mul(C.steel, 0.8), 1, 0, 1); b.add(x, gy + 0.72, 0.09, 0.05, 0, mul(C.amber, 1.2), 1, 0, 2); } }
+  for (const z of STOCK.zones) { const g = world.groundY((z.x0 + z.x1) / 2, 12, 0, 40) || 0, g0 = world.groundY(z.x0, 12, 0, 40) ?? g, g1 = world.groundY(z.x1, 12, 0, 40) ?? g;
+    // a stockpile is marked as a place behind the path: low posts, a dim rail between them, a lamp
+    for (const [x, gy] of [[z.x0, g0], [z.x1, g1]]) { b.add(x, gy + 0.3, 0.04, 0.6, 0, mul(C.steel, 0.45), 1, 0, 1); b.add(x, gy + 0.62, 0.07, 0.04, 0, mul(z.limit > 0 ? C.amber : C.steel, 0.8), 0.9, 0, 2); }
+    b.seg(z.x0, g0 + 0.5, z.x1, g1 + 0.5, 0.014, mul(C.steel, 0.35), 0.8, 0, 1); }
 }

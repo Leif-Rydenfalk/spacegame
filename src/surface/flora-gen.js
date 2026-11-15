@@ -49,7 +49,7 @@ function roots(p, r, w0, pal, n, spread) {
 // the fungal giant: a tapering trunk, buttress roots, boughs that carry broad caps with a lit underside and threads
 function capTree(p, r, lush, pal) {
   const H = p.H = (8 + r() * 9) * (0.65 + lush * 0.45), w0 = 0.32 + H * 0.03, lean = (r() - 0.5) * 0.5, ph = r() * 6.28, n = 9, pts = [];
-  p.flex = 0.22 + H * 0.028; p.hp = 3 + H * 0.5; p.hw = w0 * 0.9; p.yieldK = H / 10;
+  p.flex = 0.22 + H * 0.028; p.hp = 3 + H * 0.5; p.hw = w0 * 0.9; p.yieldK = H / 10; p.d = w0;
   const px = t => lean * t * H * 0.3 + Math.sin(t * 4 + ph) * 0.3 * t, pw = t => w0 * (1 - 0.74 * t) + w0 * 0.8 * Math.exp(-t * 13);
   for (let i = 0; i <= n; i++) { const t = i / n; pts.push([px(t), t * H - 0.1, pw(t)]); }
   roots(p, r, w0, pal, 4 + Math.floor(r() * 3), 1.2 + w0 * 3);
@@ -78,7 +78,7 @@ function capTree(p, r, lush, pal) {
 }
 // the lantern stalk of the violet thicket: slender stems from one root mass, whorls of blades, a lantern in a husk
 function lanternTree(p, r, lush, pal) {
-  const stems = 2 + Math.floor(r() * 3), H = p.H = (6 + r() * 7.5) * (0.65 + lush * 0.45), w0 = 0.16 + H * 0.014; p.flex = 0.34 + H * 0.03; p.hp = 2.5 + H * 0.4; p.hw = 0.3 + stems * 0.08; p.yieldK = H / 10;
+  const stems = 2 + Math.floor(r() * 3), H = p.H = (6 + r() * 7.5) * (0.65 + lush * 0.45), w0 = 0.16 + H * 0.014; p.flex = 0.34 + H * 0.03; p.hp = 2.5 + H * 0.4; p.hw = 0.3 + stems * 0.08; p.yieldK = H / 10; p.d = w0 * stems;
   for (let i = 0; i < 5; i++) { const d = i % 2 ? 1 : -1, L = 0.5 + r() * 1.2; S(p, d * 0.1, 0.3, d * L, -0.15, w0 * 0.7, mul(pal.bark, 0.9), 0.7, -d * 0.25, 0.5); }
   for (let i = 0; i < 4; i++) { const a = (i / 3 - 0.5) * 2.4 + (r() - 0.5) * 0.3, L = 0.7 + r() * 0.9; B(p, Math.sin(a) * L * 0.5, 0.1 + Math.cos(a) * L * 0.4, L, L * 0.3, Math.PI / 2 - a, mul(pal.leaf2, 0.7 + r() * 0.5), 12, 1, 1, 0.5, 0.4, 0.15, Math.sin(a) * 0.12); }
   for (let s = 0; s < stems; s++) {
@@ -100,7 +100,7 @@ function lanternTree(p, r, lush, pal) {
 }
 // the weeper of the acid marsh: prop roots, a leaning trunk, wide boughs, leaf masses and curtains of beaded vines
 function weeperTree(p, r, lush, pal) {
-  const H = p.H = (6.5 + r() * 7) * (0.65 + lush * 0.45), w0 = 0.3 + H * 0.03, lean = (r() - 0.5) * 1.3, ph = r() * 6.28, n = 7, pts = []; p.flex = 0.2 + H * 0.026; p.hp = 3 + H * 0.5; p.hw = w0 * 0.9; p.yieldK = H / 10;
+  const H = p.H = (6.5 + r() * 7) * (0.65 + lush * 0.45), w0 = 0.3 + H * 0.03, lean = (r() - 0.5) * 1.3, ph = r() * 6.28, n = 7, pts = []; p.flex = 0.2 + H * 0.026; p.hp = 3 + H * 0.5; p.hw = w0 * 0.9; p.yieldK = H / 10; p.d = w0;
   const px = t => lean * t * t * H * 0.16 + Math.sin(t * 3 + ph) * 0.3 * t, pw = t => w0 * (1 - 0.6 * t) + w0 * 0.5 * Math.exp(-t * 10);
   for (let i = 0; i <= n; i++) { const t = i / n * 0.72; pts.push([px(t), t * H, pw(t)]); }
   for (let i = 0, m = 5 + Math.floor(r() * 3); i < m; i++) { const d = i % 2 ? 1 : -1, y0 = 0.9 + r() * 2.2, ex = d * (0.9 + r() * 2.6); S(p, px(y0 / H), y0, ex, -0.25, w0 * (0.2 + r() * 0.16), mul(pal.bark, 0.75 + r() * 0.4), 0.4, d * (0.3 + r() * 0.45), 0.5); }

@@ -8,7 +8,8 @@ import { F } from './factory.js';
 import { BP } from './blueprint.js';
 import { K } from './kit.js';
 import { EXO, BOOT, needWorst } from './suit.js';
-import { SUP } from './supply.js';
+import { SUP, shopPart } from './supply.js';
+import { RECIPE, SHOP, toolCan, SUIT_SLOW } from '../items.js';
 import { AUTO } from './auto.js';
 import { robots, MARKET } from './robots.js';
 import { GEO, estimate, fmtEst } from './geology.js';
@@ -23,6 +24,21 @@ const has = k => F.machines.some(m => m.kind === k), ghost = k => BP.ghosts.some
 // pure in the facts it is given: f = { suit, boot, furnace, assay, zones, ironOk, assembler, routes, rig }
 export function stageOf(f) { if (!f.suit) return 1; if (!f.furnace && !f.assay) return 2; if (!(f.assay && f.zones && f.ironOk)) return 3; if (!f.rig) return 4; return 5; }
 export function facts() { const st = SUP.stock || {}; return { suit: EXO.on, boot: BOOT.done, furnace: has('furnace'), assay: has('assay station'), zones: STOCK.zones.length > 0, ironOk: (st.iron || 0) >= (SUP.targets.iron || 1) * 0.6 && has('furnace'), assembler: has('assembler'), routes: AUTO.routes.length, rig: has('shaft rig') }; }
+// round 7: the arm is the one matter compiler there is, so the first thing to build is whatever takes work off it. What
+// it has printed more than once, and what the queue has on it now, is looked at: the machine class that makes that
+// (or the shop tool in the wreck that would, if it were mended) is the suggestion; for a chip there is none yet, and it
+// says so. Returns { do, why } or null. made = { recipe: prints }, need = [{ recipe, n }] (pure in what it is given).
+export function armAdvice(made = S.printer.made || {}, need = SUP.armNeed || [], stands = has, planned = ghost, part = shopPart) {
+  const tally = {}; for (const id in made) if (made[id] >= 2) tally[id] = made[id]; for (const q of need) tally[q.recipe] = (tally[q.recipe] || 0) + q.n;
+  let best = null, bs = 0, chips = 0;
+  for (const id in tally) { const r = RECIPE[id]; if (!r || r.by === 'arm') continue; if (r.by === 'chip line') { chips += tally[id]; continue; } if (stands(r.by)) continue; const sc = tally[id] * r.t * SUIT_SLOW; if (sc > bs) { bs = sc; best = [id, r, tally[id]]; } }
+  if (best) { const [id, r, n] = best, tool = Object.keys(SHOP).find(t => toolCan(t, r)), p = tool && part(tool);
+    if (p && p.cond < 0.4) return { do: `repair the ${tool} in the wreck (r beside it)`, why: `the arm has ${n} x ${id} on it: the ${tool} makes that, and it is broken` };
+    if (planned(r.by)) return null;
+    return { do: `${r.by === 'assembler' ? 'an assembler' : 'a ' + r.by}: plan one (tab)`, why: `the arm has ${n} x ${id} on it (${(r.t * SUIT_SLOW).toFixed(0)} s each): it is the only matter compiler, and a ${r.by} makes that without it` }; }
+  if (chips >= 2) return { do: 'keep the arm for chips: queue nothing else on it by hand', why: `${chips} chips printed or waiting. only the arm makes a chip until a chip line exists, and none can be built yet` };
+  return null;
+}
 // the things to do now, most useful first: [{ do, why }]
 export function nextSteps() {
   const f = facts(), st = S.stage = Math.max(S.stage || 1, stageOf(f)), out = [], add = (d, w) => { if (out.length < 3) out.push({ do: d, why: w }); }, sh = AUTO.short || {}, P = S.P;
@@ -43,6 +59,7 @@ export function nextSteps() {
     if (AUTO.power.demand > AUTO.power.supply + 1) add('bring the reactor to the grid: its bay, or set down by the machines', `the grid wants ${(AUTO.power.demand / 1000).toFixed(0)} kw and has ${(AUTO.power.supply / 1000).toFixed(0)}`);
   }
   if (st === 4) { if (!has('assembler') && !ghost('assembler')) add('assembler: plan one (tab)', 'parts, belts and kits without waiting for the arm'); add('a shaft: tab, pick the shaft rig, press at the collar and drag down to the depth', 'the grade is better below, and you pay rod and casing only for the metres it sinks'); }
+  if (st >= 2) { const ad = armAdvice(); if (ad) add(ad.do, ad.why); }
   if (MARKET.blocked.length && out.length < 3) add('see j: ' + MARKET.blocked[0].text, 'a job no robot can take as things stand');
   if (!out.length) add('the line runs without hands', 'the ai keeps the targets; raise one (j) or plan something new');
   return out;

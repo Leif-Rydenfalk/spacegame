@@ -20,8 +20,8 @@ import { world, GRAV, SLAB, TS } from './world.js';
 import { light } from './light.js';
 import { heat } from './heat.js';
 import { S, C, mul } from './state.js';
-const RHO = { rubble: 2900, 'lean ore': 3600, slag: 2800, silicon: 2300, soil: 1500, basalt: 2900, 'iron ore': 5000, 'copper ore': 4200, lumen: 2100, iron: 7800, copper: 8900, biomass: 600, fibre: 400, chitin: 1200, 'xeno shard': 3400 }, nv = [0, 0];
-const ORG = { biomass: 1, fibre: 1, resin: 1, ichor: 1, chitin: 1 };
+const RHO = { log: 650, swarf: 2600, polymer: 1100, 'metal powder': 4500, rubble: 2900, 'lean ore': 3600, slag: 2800, silicon: 2300, soil: 1500, basalt: 2900, 'iron ore': 5000, 'copper ore': 4200, lumen: 2100, iron: 7800, copper: 8900, biomass: 600, fibre: 400, chitin: 1200, 'xeno shard': 3400 }, nv = [0, 0];
+const ORG = { biomass: 1, fibre: 1, resin: 1, ichor: 1, chitin: 1, log: 1 };
 export const ROCK = { fric: 0.65, rest: 0.18, slop: 0.012, iters: 8, vmax: 40, sleepV: 0.15, sleepT: 0.4, minPiece: 1.5, fracV: 5.5 };
 export const kgOf = (id, n) => n * ITEMS[id].m;
 const areaOf = (id, kg) => Math.max(0.012, Math.min(1.3, kg / ((RHO[id] || 1500) * SLAB)));
@@ -96,10 +96,11 @@ export const matter = {
     for (let i = 0; i < 3; i++) { const d = world.dens(x, y); if (d <= 0) break; if (world.normal(x, y, nv) < 0.05) { nv[0] = 0; nv[1] = 1; } x += nv[0] * (d + 0.06); y += nv[1] * (d + 0.06); }      // nothing is born inside the ground
     const c = { uid, id, n, kg, x, y, vx, vy, av: rand(-3, 3), rot: (hash(uid, 3, 913) - 0.5) * 3, temp, rest: 0, asleep: false, seed: hash(uid, 7, 912) * 100, claim: null, dumped: false, lv: new Float64Array(16), wv: new Float64Array(16), wn: new Float64Array(16), touch: 0, hit: 0, deep: 0, ax: x, ay: y, ar: 0, still: 0 };
     if (id === 'rubble') { c.q = { ...(inv.nextQ || inv.lastQ || { fe: 0.09, cu: 0.00006, lm: 0, host: 2 }) }; inv.nextQ = null; }       // rock nobody has assayed carries what it really is (geology.js)
-    shapeNew(c, uid); fit(c); this.list.push(c); this.made += kg; return c;
+    if (inv.nextC !== null) { if (whole(id) && inv.nextC < 0.999) c.cond = inv.nextC; inv.nextC = null; }       // a kit set down keeps the condition of the machine it was
+    shapeNew(c, uid); if (id === 'log') { c.asp = 2.6 + hash(uid, 6, 915) * 1.2; c.cut = [0.5, 0.5, 0.5, 0.5]; c.rot = (hash(uid, 3, 913) - 0.5) * 0.4; } fit(c); this.list.push(c); this.made += kg; return c;
   },
   // take up to n out of a body; returns the amount taken. The body is removed when it is empty.
-  take(c, n) { const k = Math.min(n, c.n); if (c.q) inv.lastQ = c.q; c.n -= k; c.kg = kgOf(c.id, c.n); this.taken += kgOf(c.id, k); if (c.n <= 1e-9) { const i = this.list.indexOf(c); if (i >= 0) this.list.splice(i, 1); c.gone = true; } else fit(c); this.wake(c.x, c.y, c.br + 1); return k; },
+  take(c, n) { const k = Math.min(n, c.n); if (c.q) inv.lastQ = c.q; inv.lastC = c.cond === undefined ? 1 : c.cond; c.n -= k; c.kg = kgOf(c.id, c.n); this.taken += kgOf(c.id, k); if (c.n <= 1e-9) { const i = this.list.indexOf(c); if (i >= 0) this.list.splice(i, 1); c.gone = true; } else fit(c); this.wake(c.x, c.y, c.br + 1); return k; },
   // what rested on something that is gone has to fall
   wake(x, y, r) { for (const o of this.list) if (o.asleep && Math.abs(o.x - x) < r + o.br && Math.abs(o.y - y) < r + o.br) { o.asleep = false; o.rest = 0; o.casc = 1; } },
   wakeBox(x0, y0, x1, y1) { for (const o of this.list) if (o.asleep && o.x > x0 - o.br - 0.3 && o.x < x1 + o.br + 0.3 && o.y > y0 - o.br - 0.3 && o.y < y1 + o.br + 0.3) { o.asleep = false; o.rest = 0; o.casc = 1; } },
@@ -128,7 +129,7 @@ export const matter = {
   sub(dt) {
     const L = this.list, R = ROCK; let awake = 0; stamp++; nc = 0;
     for (const c of L) {
-      if (c.temp > 0) c.temp = Math.max(0, c.temp - dt * (0.12 + c.temp * 0.3)); if (c.cool > 0) c.cool -= dt;
+      if (c.temp > 0) c.temp = Math.max(0, c.temp - dt * (0.12 + c.temp * 0.3)); if (c.cool > 0) c.cool -= dt; c.back = !!c.zone;       // what lies in a stockpile is on the back layer
       if (c.chk) { c.chk = 0; pose(c); let sup = false; for (let i = 0; i < 16 && !sup; i += 2) if (world.dist(c.wv[i], c.wv[i + 1]) < 0.06) sup = true; if (!sup) c.asleep = false; }      // loaded from a save: does the ground still hold it?
       if (c.asleep) continue; awake++;
       if (c.casc) { c.casc = 0; if (c.wasRest) this.wake(c.x, c.y, 0.12); } c.wasRest = 0;      // it lost its support: what leaned on it has to look again
@@ -145,7 +146,7 @@ export const matter = {
     for (const [key, cell] of grid) {
       if (cell.length < 2) continue; const ci = Math.floor(key / 65536) - 32768, cj = (key % 65536) - 32768;
       for (let a = 0; a < cell.length; a++) for (let b = a + 1; b < cell.length; b++) {
-        const A = cell[a], B = cell[b]; if (A.gone || B.gone) continue; const dx = B.x - A.x, dy = B.y - A.y, rr = A.br + B.br; if (dx * dx + dy * dy > rr * rr) continue;
+        const A = cell[a], B = cell[b]; if (A.gone || B.gone || A.back !== B.back) continue; const dx = B.x - A.x, dy = B.y - A.y, rr = A.br + B.br; if (dx * dx + dy * dy > rr * rr) continue;
         // a pair that shares several cells is handled in the one that holds the corner of its overlap
         if (Math.floor(Math.max(A.x - A.br, B.x - B.br) / GC) !== ci || Math.floor(Math.max(A.y - A.br, B.y - B.br) / GC) !== cj) continue;
         if (A.asleep && B.asleep) {       // only when there are very many: resting gravel of one kind becomes one heap
@@ -204,23 +205,26 @@ export const matter = {
     if (broke) for (const c of broke) this.fracture(c, c.hit > fracSpeed(c.kg) * 1.7 ? 3 : 2);
     for (let i = L.length - 1; i >= 0; i--) if (L[i].gone) L.splice(i, 1);
   },
-  draw(b, time) {
-    const cam = S.cam;
+  // back = the layer: what lies in a stockpile is drawn first, darker, behind everything that stands or walks
+  draw(b, time, back = false) {
+    const cam = S.cam, dim = back ? 0.55 : 1;
     for (const c of this.list) {
+      if (!!c.back !== back) continue;
       if (Math.abs(c.x - cam.x) > 24 * Math.min(S.zo, 4) || Math.abs(c.y - cam.y) > 14 * Math.min(S.zo, 4)) continue;
       const d = ITEMS[c.id], col = d.c || C.steel, org = ORG[c.id], w = c.hw * 2, h = c.hh * 2;
-      if (whole(c.id)) { b.poly(c.x, c.y, w, h, c.rot, mul(C.steel, 0.7), 1, 1, c.seed, c.cut); b.add(c.x, c.y, Math.min(w, h) * 0.4, Math.min(w, h) * 0.4, c.rot, mul(col, 1.2), 1, 0, 2, 1); continue; }
-      b.poly(c.x, c.y, w, h, c.rot, mul(col, (org ? 0.24 : 0.46) * (0.85 + 0.3 * hash(c.uid, 1, 5))), 1, 1, c.seed, c.cut);
+      if (whole(c.id)) { b.poly(c.x, c.y, w, h, c.rot, mul(C.steel, 0.7 * dim), 1, 1, c.seed, c.cut); b.add(c.x, c.y, Math.min(w, h) * 0.4, Math.min(w, h) * 0.4, c.rot, mul(col, 1.2 * dim), 1, 0, 2, 1); continue; }
+      b.poly(c.x, c.y, w, h, c.rot, mul(col, dim * (org ? 0.24 : 0.46) * (0.85 + 0.3 * hash(c.uid, 1, 5))), 1, 1, c.seed, c.cut);
+      if (c.id === 'log') { const cs = Math.cos(c.rot), sn = Math.sin(c.rot); for (const d of [-1, 1]) b.add(c.x + cs * c.hw * d * 0.96, c.y + sn * c.hw * d * 0.96, 0.05, c.hh * 1.7, c.rot, mul([0.5, 0.36, 0.2], dim), 1, 0, 1); }       // the sawn ends
       if (c.temp > 0.06 && !org) b.poly(c.x, c.y, w, h, c.rot, [1.5 * c.temp, 0.3 * c.temp * c.temp, 0.02 * c.temp], Math.min(0.8, c.temp), 2, c.seed, c.cut);
       if (c.temp > 0.15) { b.add(c.x, c.y, c.r * 4, c.r * 4, 0, [1.2, 0.28, 0.03], Math.min(0.35, c.temp * 0.3), 1, 2); light.emit(c.x / TS, c.y / TS, 1.2 * c.temp, 0.3 * c.temp, 0.04 * c.temp); }
       if (c.id === 'lumen') { b.add(c.x, c.y, c.r * 4, c.r * 4, 0, mul(C.cyan, 0.3), 0.6, 1, 2); light.emit(c.x / TS, c.y / TS, 0.03, 0.3, 0.26); }
     }
   },
   // a body is saved with its pose and its shape, so a pile comes back as the pile it was
-  dump() { const f = v => +v.toFixed(3); return this.list.map(c => { const o = [c.id, +c.n.toFixed(5), f(c.x), f(c.y), c.dumped ? 1 : 0, f(c.rot), f(c.asp), c.cut.map(f)]; if (c.q || c.zone) o.push(c.q ? [+c.q.fe.toFixed(4), +c.q.cu.toFixed(5), +c.q.lm.toFixed(5), c.q.host, c.q.ox === undefined ? null : f(c.q.ox), c.q.oy === undefined ? null : f(c.q.oy)] : 0, c.zone || 0); return o; }); },
+  dump() { const f = v => +v.toFixed(3); return this.list.map(c => { const o = [c.id, +c.n.toFixed(5), f(c.x), f(c.y), c.dumped ? 1 : 0, f(c.rot), f(c.asp), c.cut.map(f)]; if (c.q || c.zone || c.cond !== undefined) o.push(c.q ? [+c.q.fe.toFixed(4), +c.q.cu.toFixed(5), +c.q.lm.toFixed(5), c.q.host, c.q.ox === undefined ? null : f(c.q.ox), c.q.oy === undefined ? null : f(c.q.oy)] : 0, c.zone || 0); if (c.cond !== undefined) o.push(f(c.cond)); return o; }); },
   load(a) {
     this.list.length = 0; this.made = this.taken = 0; this.nextId = 1;
-    for (const q of a || []) { if (!ITEMS[q[0]]) continue; if (q[8]) inv.nextQ = { fe: q[8][0], cu: q[8][1], lm: q[8][2], host: q[8][3], ...(q[8][4] === null || q[8][4] === undefined ? {} : { ox: q[8][4], oy: q[8][5] }) }; const c = this.spawn(q[0], q[1], q[2], q[3]); if (!c) continue; c.dumped = !!q[4]; if (q[9]) c.zone = q[9]; c.av = 0; if (q[7]) { c.rot = q[5]; c.asp = q[6]; c.cut = q[7].slice(); } else c.rot = 0; fit(c); c.asleep = true; c.wasRest = 1; c.chk = 1; }      // a version 4 body had no shape: it gets one from its place in the list
+    for (const q of a || []) { if (!ITEMS[q[0]]) continue; if (q[8]) inv.nextQ = { fe: q[8][0], cu: q[8][1], lm: q[8][2], host: q[8][3], ...(q[8][4] === null || q[8][4] === undefined ? {} : { ox: q[8][4], oy: q[8][5] }) }; const c = this.spawn(q[0], q[1], q[2], q[3]); if (!c) continue; c.dumped = !!q[4]; if (q[9]) { c.zone = q[9]; c.back = true; } if (q[10] !== undefined) c.cond = q[10]; c.av = 0; if (q[7]) { c.rot = q[5]; c.asp = q[6]; c.cut = q[7].slice(); } else c.rot = 0; fit(c); c.asleep = true; c.wasRest = 1; c.chk = 1; }      // a version 4 body had no shape: it gets one from its place in the list
   },
 };
 world.onEdit = (x0, y0, x1, y1) => { if (matter.list.length) matter.wakeBox(x0, y0, x1, y1); if (world.onEdit2) world.onEdit2(x0, y0, x1, y1); };

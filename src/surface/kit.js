@@ -12,7 +12,7 @@ import { heat } from './heat.js';
 import { S, C, mul } from './state.js';
 import { env } from './env.js';
 import { creatures, hurtPulse, KIND } from './creatures.js';
-import { floraHit, floraBlast } from './flora.js';
+import { floraHit, floraBlast, floraBeam, floraAim } from './flora.js';
 import { matter } from './matter.js';
 import { F } from './factory.js';
 import { powerBudget, linked, REACTOR_W, LASER_W, REACTOR_BACK, SUIT_BUS_W, CHARGE_W, CABLE, MIN_FRAC, REACTOR_KG, LASER_KG, ANT_RANGE, SHIP_LINK, TURRET_RANGE } from './power.js';
@@ -90,10 +90,12 @@ export function firePulse(mx, my, ang, frac, own) {
   if (frac < MIN_FRAC) {                     // starved: a thread of light that cuts nothing
     const len = 0.6 + Math.random() * 0.5; l.beam = { x1: mx, y1: my, x2: mx + dx * len, y2: my + dy * len, hit: false, weak: true, ang, life: 0.08 }; for (let i = 0; i < 2; i++) S.parts.spawn({ x: mx, y: my, vx: dx * rand(1, 4) + rand(-1, 1), vy: dy * rand(1, 4) + rand(-1, 1), life: rand(0.1, 0.3), size: 0.03, c: [3, 1.2, 0.3], grav: 0.3 }); return l.beam;
   }
-  const hit = world.ray(mx, my, dx, dy, LASER.range); let len = hit ? hit.d : LASER.range, E = PULSE_BEAM_J * l.optics, stopped = false;
+  const hit = world.ray(mx, my, dx, dy, LASER.range); let len = hit ? hit.d : LASER.range, E = PULSE_BEAM_J * l.optics, stopped = false, wood = false;
   l.sinkJ += PULSE_HEAT_J; l.pulses++; S.stats.shots = (S.stats.shots || 0) + 1; l.flashT = 0.09;
-  const burnt = new Set();                    // the pulse drills each body it crosses once; a small one does not stop it
-  for (let t = 0.25; t < len && !stopped; t += 0.12) { const px = mx + dx * t, py = my + dy * t; if ((Math.round(t * 100) % 36) === 1) floraHit(px, py, 0.9, 0.2); for (const c of creatures) { if (burnt.has(c)) continue; const r = hurtPulse(c, px, py, E, dx, dy); if (r) { burnt.add(c); E -= r.used; if (E < PULSE_BEAM_J * 0.12) { len = t; stopped = true; break; } } } }
+  const burnt = new Set(), aimTree = own ? floraAim(S.mouse.x, S.mouse.y) : null;                    // the pulse drills each body it crosses once; a small one does not stop it
+  for (let t = 0.25; t < len && !stopped; t += 0.12) { const px = mx + dx * t, py = my + dy * t; if ((Math.round(t * 100) % 36) === 1) floraHit(px, py, 0.9, 0.2);
+    if (aimTree && floraBeam(px, py, E, mx, aimTree)) { len = t; stopped = true; wood = true; break; }       // the trunk that is aimed at takes the pulse: wood chars, and the beam ends in it
+    for (const c of creatures) { if (burnt.has(c)) continue; const r = hurtPulse(c, px, py, E, dx, dy); if (r) { burnt.add(c); E -= r.used; if (E < PULSE_BEAM_J * 0.12) { len = t; stopped = true; break; } } } }
   const ex = mx + dx * len, ey = my + dy * len;
   l.beam = { x1: mx, y1: my, x2: ex, y2: ey, hit: !!hit && !stopped, ang, life: 0.085 };
   env.noise(ex, ey, 30, own); G.shake = Math.max(G.shake, 0.03); S.glare = 1; S.scare = Math.max(S.scare || 0, 0.9);

@@ -1,78 +1,111 @@
 # CHECK
 
-Run: 2026-11-14T22:22:16.375Z by `node tools/check.mjs` on foreman-ops-1 (arm64, Node v18.20.4).
+Run: 2026-11-15T07:58:21.277Z by `node tools/check.mjs` on foreman-ops-1 (arm64, Node v18.20.4).
 Browser: /usr/bin/chromium headless, software GL (`--use-angle=swiftshader`). **Frame times below are software-rendering numbers, not a GPU number**; the 16.7 ms budget must be measured on a machine with a GPU.
 
-Result: **PASS**. Property tests: `tests ok 100`.
+Result: **PASS**. Property tests: `tests ok 110`.
 
 Save round-trip (save, reload the page, compare the state hash):
-- surface: explicit save ec13c267, stored blob ec13c267, state after reload ec13c267: identical
-- surface, the kit, loose matter, robots, stock targets: explicit save afe5bdb5, stored blob afe5bdb5, state after reload afe5bdb5: identical
-- surface, the build queue, the fabricator, the ground hauler: explicit save 1e84a021, stored blob 1e84a021, state after reload 1e84a021: identical
-- space: explicit save 11c026f6, stored blob 11c026f6, state after reload 11c026f6: identical
-- a round 4 save (version 4, hash 96ff5c76, 3 loose bodies, 97 kg of iron ore loose, carried and in the hold, 7 ghosts, 3 robots) migrated to version 6: the suit (its furnace went straight into the frame beside it), the queue, the robots and every kilogram of ore are there, the loose bodies have shapes, 10 s of play, then saved and reloaded as version 6 with state 7a1e04e9: ok
-- a round 5 save (version 5, hash 303d6deb, written by the v0.5 build: 3 robots, antenna,furnace, 109.5 kg of iron ore loose, carried, in the suit, the hold and the furnace, 6 ghosts, 1 deck) migrated to version 6: you are in the exosuit with the ai up, the wreck has all its parts, the crash site counts as scanned, the robots, the machines, the deck and every kilogram of ore are there, 10 s of play with no robot giving a job up, then saved and reloaded with state 9500b7cd: ok
+- surface: explicit save 8fdb34ed, stored blob 8fdb34ed, state after reload 8fdb34ed: identical
+- surface, the kit, loose matter, robots, stock targets: explicit save 87e80e37, stored blob 87e80e37, state after reload 87e80e37: identical
+- surface, the build queue, the machine shop and the arm at work, the ground hauler: explicit save fcbab611, stored blob fcbab611, state after reload fcbab611: identical
+- space: explicit save f11dfaaf, stored blob f11dfaaf, state after reload f11dfaaf: identical
+- a round 4 save (version 4, hash 96ff5c76, 3 loose bodies, 97 kg of iron ore loose, carried and in the hold, 7 ghosts, 3 robots) migrated to version 7: the suit (its furnace went straight into the frame beside it), the queue, the robots and every kilogram of ore are there (the arm may already have taken 4 kg of your basalt for the silicon of the chip an assembler's controller needs: round 7), the loose bodies have shapes, 10 s of play, then saved and reloaded as version 7 with state ee12ee36: ok
+- a round 5 save (version 5, hash 303d6deb, written by the v0.5 build: 3 robots, antenna,furnace, 109.5 kg of iron ore loose, carried, in the suit, the hold and the furnace, 6 ghosts, 1 deck) migrated to version 7: you are in the exosuit with the ai up, the wreck has all its parts, the crash site counts as scanned, the robots, the machines, the deck and every kilogram of ore are there, 10 s of play with no robot giving a job up, then saved and reloaded with state 189f76ff: ok
+- a round 6 save (version 6, hash bbcafbf2, written by the v0.6 build with its "fabricator" 16 s into a furnace: 3 robots, 7 ghosts, ore bin and rock pile) migrated to version 7: there is no fabricator and no job of one, the 40 kg of basalt it had taken are back in the hold (70 kg), the wreck has its machine shop (cnc mill,metal printer,polymer printer,solder bench), the old rock pile is closed, the four planners are in the suit, the queue, the robots and what you carried are there; 15 s of play (cnc mill:chest; on the arm: nothing) with nothing given up, then saved and reloaded with state 6e89992c: ok
 
 | scenario | url | shot | console errors | p50 ms | p95 ms | max ms |
 |---|---|---|---|---|---|---|
 | title | `` | [docs/shots/title.png](shots/title.png) | 0 | - | - | - |
-| surface | `?act=surface` | [docs/shots/surface.png](shots/surface.png) | 0 | 1467 | 1467 | 1467 |
+| surface | `?act=surface` | [docs/shots/surface.png](shots/surface.png) | 0 | 1400 | 1400 | 1400 |
 | slice | `?act=surface&scenario=slice&auto=1&t=16` | [docs/shots/slice.png](shots/slice.png) | 0 | - | - | - |
 | reactor | `?act=surface&scenario=reactor&auto=1&t=4` | [docs/shots/reactor.png](shots/reactor.png) | 0 | 1300 | 1300 | 1300 |
-| turret | `?act=surface&scenario=turret&auto=1&t=0.9` | [docs/shots/turret.png](shots/turret.png) | 0 | 1267 | 1267 | 1267 |
-| herd | `?act=surface&scenario=herd&t=2` | [docs/shots/herd.png](shots/herd.png) | 0 | 1350 | 1350 | 1350 |
-| predator | `?act=surface&scenario=predator&auto=1&t=1.4` | [docs/shots/predator.png](shots/predator.png) | 0 | 1600 | 1600 | 1600 |
+| turret | `?act=surface&scenario=turret&auto=1&t=0.9` | [docs/shots/turret.png](shots/turret.png) | 0 | 1133 | 1133 | 1133 |
+| herd | `?act=surface&scenario=herd&t=2` | [docs/shots/herd.png](shots/herd.png) | 0 | 1400 | 1400 | 1400 |
+| predator | `?act=surface&scenario=predator&auto=1&t=1.4` | [docs/shots/predator.png](shots/predator.png) | 0 | 1433 | 1433 | 1433 |
 | supply | `?act=surface&scenario=supply&t=45` | [docs/shots/supply.png](shots/supply.png) | 0 | - | - | - |
-| forest | `?act=surface&scenario=forest` | [docs/shots/forest.png](shots/forest.png) | 0 | 1267 | 1267 | 1267 |
-| drill | `?act=surface&scenario=drill&auto=1&t=3` | [docs/shots/drill.png](shots/drill.png) | 0 | 1417 | 1417 | 1417 |
-| inventory | `?act=surface&scenario=inventory` | [docs/shots/inventory.png](shots/inventory.png) | 0 | 1150 | 1150 | 1150 |
-| factory | `?act=surface&scenario=factory&t=30` | [docs/shots/factory.png](shots/factory.png) | 0 | 1250 | 1250 | 1250 |
-| blueprint | `?act=surface&scenario=blueprint&t=3.5` | [docs/shots/blueprint.png](shots/blueprint.png) | 0 | 1267 | 1267 | 1267 |
-| combat | `?act=surface&scenario=combat&auto=1&t=2.5` | [docs/shots/combat.png](shots/combat.png) | 0 | 1183 | 1183 | 1183 |
-| ruins | `?act=surface&scenario=ruins` | [docs/shots/ruins.png](shots/ruins.png) | 0 | 1133 | 1133 | 1133 |
-| base | `?act=surface&scenario=base` | [docs/shots/base.png](shots/base.png) | 0 | 833 | 1000 | 1000 |
-| hive | `?act=surface&scenario=hive&t=6` | [docs/shots/hive.png](shots/hive.png) | 0 | 1267 | 1267 | 1267 |
-| planet | `?act=surface&scenario=planet` | [docs/shots/planet.png](shots/planet.png) | 0 | 433 | 900 | 900 |
-| horizon | `?act=surface&scenario=horizon` | [docs/shots/horizon.png](shots/horizon.png) | 0 | 467 | 667 | 667 |
-| far90 | `?act=surface&scenario=far90&auto=1&t=3` | [docs/shots/far90.png](shots/far90.png) | 0 | 1333 | 1333 | 1333 |
-| seam | `?act=surface&scenario=seam&auto=1&t=8` | [docs/shots/seam.png](shots/seam.png) | 0 | 1450 | 1450 | 1450 |
-| antipode | `?act=surface&scenario=antipode&t=2` | [docs/shots/antipode.png](shots/antipode.png) | 0 | 1250 | 1250 | 1250 |
-| autobuild | `?act=surface&scenario=autobuild&t=120` | [docs/shots/autobuild.png](shots/autobuild.png) | 0 | 1200 | 1200 | 1200 |
-| queue | `?act=surface&scenario=queue&t=20` | [docs/shots/queue.png](shots/queue.png) | 0 | 1250 | 1250 | 1250 |
-| conveyor | `?act=surface&scenario=conveyor&t=120` | [docs/shots/conveyor.png](shots/conveyor.png) | 0 | 1167 | 1167 | 1167 |
-| overhang | `?act=surface&scenario=overhang&t=9` | [docs/shots/overhang.png](shots/overhang.png) | 0 | 1500 | 1500 | 1500 |
+| forest | `?act=surface&scenario=forest` | [docs/shots/forest.png](shots/forest.png) | 0 | 1233 | 1233 | 1233 |
+| drill | `?act=surface&scenario=drill&auto=1&t=3` | [docs/shots/drill.png](shots/drill.png) | 0 | 1667 | 1667 | 1667 |
+| inventory | `?act=surface&scenario=inventory` | [docs/shots/inventory.png](shots/inventory.png) | 0 | 1383 | 1383 | 1383 |
+| factory | `?act=surface&scenario=factory&t=30` | [docs/shots/factory.png](shots/factory.png) | 0 | - | - | - |
+| blueprint | `?act=surface&scenario=blueprint&t=3.5` | [docs/shots/blueprint.png](shots/blueprint.png) | 0 | 1333 | 1333 | 1333 |
+| combat | `?act=surface&scenario=combat&auto=1&t=2.5` | [docs/shots/combat.png](shots/combat.png) | 0 | 1167 | 1167 | 1167 |
+| ruins | `?act=surface&scenario=ruins` | [docs/shots/ruins.png](shots/ruins.png) | 0 | 17 | 17 | 17 |
+| base | `?act=surface&scenario=base` | [docs/shots/base.png](shots/base.png) | 0 | 1217 | 1217 | 1217 |
+| hive | `?act=surface&scenario=hive&t=6` | [docs/shots/hive.png](shots/hive.png) | 0 | 1383 | 1383 | 1383 |
+| planet | `?act=surface&scenario=planet` | [docs/shots/planet.png](shots/planet.png) | 0 | 467 | 1017 | 1017 |
+| horizon | `?act=surface&scenario=horizon` | [docs/shots/horizon.png](shots/horizon.png) | 0 | 483 | 683 | 683 |
+| far90 | `?act=surface&scenario=far90&auto=1&t=3` | [docs/shots/far90.png](shots/far90.png) | 0 | 2517 | 2517 | 2517 |
+| seam | `?act=surface&scenario=seam&auto=1&t=8` | [docs/shots/seam.png](shots/seam.png) | 0 | 1667 | 1667 | 1667 |
+| antipode | `?act=surface&scenario=antipode&t=2` | [docs/shots/antipode.png](shots/antipode.png) | 0 | 1500 | 1500 | 1500 |
+| autobuild | `?act=surface&scenario=autobuild&t=360` | [docs/shots/autobuild.png](shots/autobuild.png) | 0 | - | - | - |
+| queue | `?act=surface&scenario=queue&t=20` | [docs/shots/queue.png](shots/queue.png) | 0 | - | - | - |
+| conveyor | `?act=surface&scenario=conveyor&t=120` | [docs/shots/conveyor.png](shots/conveyor.png) | 0 | - | - | - |
+| overhang | `?act=surface&scenario=overhang&t=9` | [docs/shots/overhang.png](shots/overhang.png) | 0 | 17 | 17 | 17 |
 | targets | `?act=surface&scenario=targets&t=30` | [docs/shots/targets.png](shots/targets.png) | 0 | - | - | - |
-| fall | `?act=surface&scenario=fall&t=4` | [docs/shots/fall.png](shots/fall.png) | 0 | 1233 | 1233 | 1233 |
-| layers | `?act=surface&scenario=layers&t=3` | [docs/shots/layers.png](shots/layers.png) | 0 | 1450 | 1450 | 1450 |
+| fall | `?act=surface&scenario=fall&t=4` | [docs/shots/fall.png](shots/fall.png) | 0 | 1383 | 1383 | 1383 |
+| layers | `?act=surface&scenario=layers&t=3` | [docs/shots/layers.png](shots/layers.png) | 0 | 1383 | 1383 | 1383 |
 | rocks | `?act=surface&scenario=rocks&t=24` | [docs/shots/rocks.png](shots/rocks.png) | 0 | - | - | - |
-| place | `?act=surface&scenario=place&t=1` | [docs/shots/place.png](shots/place.png) | 0 | 1333 | 1333 | 1333 |
-| plan | `?act=surface&scenario=plan&t=120` | [docs/shots/plan.png](shots/plan.png) | 0 | 1100 | 1100 | 1100 |
-| wake | `?act=surface&t=3` | [docs/shots/wake.png](shots/wake.png) | 0 | 933 | 1150 | 1150 |
-| suitup | `?act=surface&scenario=suitup&auto=1&t=8` | [docs/shots/suitup.png](shots/suitup.png) | 0 | 1267 | 1267 | 1267 |
-| interior | `?act=surface&scenario=interior` | [docs/shots/interior.png](shots/interior.png) | 0 | 950 | 1133 | 1133 |
-| kerf | `?act=surface&scenario=kerf&auto=1&t=14` | [docs/shots/kerf.png](shots/kerf.png) | 0 | 1433 | 1433 | 1433 |
-| heat | `?act=surface&scenario=heat&auto=1&t=12` | [docs/shots/heat.png](shots/heat.png) | 0 | 1200 | 1200 | 1200 |
-| fists | `?act=surface&scenario=fists&auto=1&t=6` | [docs/shots/fists.png](shots/fists.png) | 0 | 1200 | 1200 | 1200 |
-| defend | `?act=surface&scenario=defend&t=5` | [docs/shots/defend.png](shots/defend.png) | 0 | 1333 | 1333 | 1333 |
-| swarm | `?act=surface&scenario=swarm&t=7` | [docs/shots/swarm.png](shots/swarm.png) | 0 | 1183 | 1183 | 1183 |
-| market | `?act=surface&scenario=market&t=25` | [docs/shots/market.png](shots/market.png) | 0 | 1200 | 1200 | 1200 |
-| rescue | `?act=surface&scenario=rescue&t=13` | [docs/shots/rescue.png](shots/rescue.png) | 0 | 1217 | 1217 | 1217 |
+| place | `?act=surface&scenario=place&t=1` | [docs/shots/place.png](shots/place.png) | 0 | 1383 | 1383 | 1383 |
+| plan | `?act=surface&scenario=plan&t=200` | [docs/shots/plan.png](shots/plan.png) | 0 | - | - | - |
+| wake | `?act=surface&t=3` | [docs/shots/wake.png](shots/wake.png) | 0 | 2183 | 2183 | 2183 |
+| suitup | `?act=surface&scenario=suitup&auto=1&t=8` | [docs/shots/suitup.png](shots/suitup.png) | 0 | 1400 | 1400 | 1400 |
+| interior | `?act=surface&scenario=interior` | [docs/shots/interior.png](shots/interior.png) | 0 | 1250 | 1250 | 1250 |
+| kerf | `?act=surface&scenario=kerf&auto=1&t=14` | [docs/shots/kerf.png](shots/kerf.png) | 0 | 17 | 17 | 17 |
+| heat | `?act=surface&scenario=heat&auto=1&t=12` | [docs/shots/heat.png](shots/heat.png) | 0 | 1633 | 1633 | 1633 |
+| fists | `?act=surface&scenario=fists&auto=1&t=6` | [docs/shots/fists.png](shots/fists.png) | 0 | 1300 | 1300 | 1300 |
+| defend | `?act=surface&scenario=defend&t=5` | [docs/shots/defend.png](shots/defend.png) | 0 | 1417 | 1417 | 1417 |
+| swarm | `?act=surface&scenario=swarm&t=7` | [docs/shots/swarm.png](shots/swarm.png) | 0 | 1133 | 1133 | 1133 |
+| market | `?act=surface&scenario=market&t=25` | [docs/shots/market.png](shots/market.png) | 0 | - | - | - |
+| rescue | `?act=surface&scenario=rescue&t=13` | [docs/shots/rescue.png](shots/rescue.png) | 0 | 1233 | 1233 | 1233 |
 | stockpile | `?act=surface&scenario=stockpile&t=70` | [docs/shots/stockpile.png](shots/stockpile.png) | 0 | - | - | - |
-| reach | `?act=surface&scenario=reach&t=4` | [docs/shots/reach.png](shots/reach.png) | 0 | 1300 | 1300 | 1300 |
-| assay | `?act=surface&scenario=assay&t=40` | [docs/shots/assay.png](shots/assay.png) | 0 | 1117 | 1117 | 1117 |
-| shaft | `?act=surface&scenario=shaft&t=110` | [docs/shots/shaft.png](shots/shaft.png) | 0 | 1000 | 1000 | 1000 |
-| supports | `?act=surface&scenario=supports&t=60` | [docs/shots/supports.png](shots/supports.png) | 0 | 1350 | 1350 | 1350 |
-| collapse | `?act=surface&scenario=collapse&t=14` | [docs/shots/collapse.png](shots/collapse.png) | 0 | 1333 | 1333 | 1333 |
-| wires | `?act=surface&scenario=wires&t=8` | [docs/shots/wires.png](shots/wires.png) | 0 | 1100 | 1100 | 1100 |
-| needs | `?act=surface&scenario=needs&t=5` | [docs/shots/needs.png](shots/needs.png) | 0 | 1300 | 1300 | 1300 |
-| fog | `?act=surface&scenario=fog&t=3` | [docs/shots/fog.png](shots/fog.png) | 0 | 1283 | 1283 | 1283 |
-| deckrock | `?act=surface&scenario=deckrock&t=8` | [docs/shots/deckrock.png](shots/deckrock.png) | 0 | 1117 | 1117 | 1117 |
-| knowledge | `?act=surface&scenario=knowledge` | [docs/shots/knowledge.png](shots/knowledge.png) | 0 | 433 | 583 | 583 |
-| launch | `?act=space&scenario=launch` | [docs/shots/launch.png](shots/launch.png) | 0 | 250 | 517 | 517 |
-| orbit | `?act=space` | [docs/shots/orbit.png](shots/orbit.png) | 0 | 217 | 583 | 583 |
-| mining | `?act=space&scenario=mining&auto=1&t=20` | [docs/shots/mining.png](shots/mining.png) | 0 | 200 | 350 | 350 |
-| combat-space | `?act=space&scenario=combat&auto=1&t=13` | [docs/shots/combat-space.png](shots/combat-space.png) | 0 | 167 | 183 | 283 |
-| builder | `?act=space&scenario=builder` | [docs/shots/builder.png](shots/builder.png) | 0 | 167 | 200 | 283 |
+| reach | `?act=surface&scenario=reach&t=4` | [docs/shots/reach.png](shots/reach.png) | 0 | 1333 | 1333 | 1333 |
+| assay | `?act=surface&scenario=assay&t=40` | [docs/shots/assay.png](shots/assay.png) | 0 | - | - | - |
+| shaft | `?act=surface&scenario=shaft&t=110` | [docs/shots/shaft.png](shots/shaft.png) | 0 | 1200 | 1200 | 1200 |
+| rockwalk | `?act=surface&scenario=rockwalk&auto=1&t=14` | [docs/shots/rockwalk.png](shots/rockwalk.png) | 0 | 1217 | 1217 | 1217 |
+| idleaudit | `?act=surface&scenario=idleaudit&t=40` | [docs/shots/idleaudit.png](shots/idleaudit.png) | 0 | - | - | - |
+| decon | `?act=surface&scenario=decon&t=14` | [docs/shots/decon.png](shots/decon.png) | 0 | 1117 | 1117 | 1117 |
+| decon-done | `?act=surface&scenario=decon&t=150` | [docs/shots/decon-done.png](shots/decon-done.png) | 0 | 1083 | 1083 | 1083 |
+| belts | `?act=surface&scenario=belts&t=40` | [docs/shots/belts.png](shots/belts.png) | 0 | 1117 | 1117 | 1117 |
+| propose | `?act=surface&scenario=propose&t=30` | [docs/shots/propose.png](shots/propose.png) | 0 | 1250 | 1250 | 1250 |
+| planners | `?act=surface&scenario=planners&t=2` | [docs/shots/planners.png](shots/planners.png) | 0 | 1200 | 1200 | 1200 |
+| collar | `?act=surface&scenario=collar&t=230` | [docs/shots/collar.png](shots/collar.png) | 0 | - | - | - |
+| spoil | `?act=surface&scenario=spoil&t=260` | [docs/shots/spoil.png](shots/spoil.png) | 0 | - | - | - |
+| heap | `?act=surface&scenario=heap&auto=1&t=6` | [docs/shots/heap.png](shots/heap.png) | 0 | 1517 | 1517 | 1517 |
+| trees | `?act=surface&scenario=trees&auto=1&t=6` | [docs/shots/trees.png](shots/trees.png) | 0 | 1367 | 1367 | 1367 |
+| felling | `?act=surface&scenario=felling&t=200` | [docs/shots/felling.png](shots/felling.png) | 0 | - | - | - |
+| shop | `?act=surface&scenario=shop&t=12` | [docs/shots/shop.png](shots/shop.png) | 0 | 1250 | 1250 | 1250 |
+| supports | `?act=surface&scenario=supports&t=60` | [docs/shots/supports.png](shots/supports.png) | 0 | - | - | - |
+| collapse | `?act=surface&scenario=collapse&t=14` | [docs/shots/collapse.png](shots/collapse.png) | 0 | 1350 | 1350 | 1350 |
+| wires | `?act=surface&scenario=wires&t=8` | [docs/shots/wires.png](shots/wires.png) | 0 | 1200 | 1200 | 1200 |
+| needs | `?act=surface&scenario=needs&t=5` | [docs/shots/needs.png](shots/needs.png) | 0 | 1383 | 1383 | 1383 |
+| fog | `?act=surface&scenario=fog&t=3` | [docs/shots/fog.png](shots/fog.png) | 0 | 1367 | 1367 | 1367 |
+| deckrock | `?act=surface&scenario=deckrock&t=8` | [docs/shots/deckrock.png](shots/deckrock.png) | 0 | 1167 | 1167 | 1167 |
+| knowledge | `?act=surface&scenario=knowledge` | [docs/shots/knowledge.png](shots/knowledge.png) | 0 | 450 | 533 | 533 |
+| launch | `?act=space&scenario=launch` | [docs/shots/launch.png](shots/launch.png) | 0 | 267 | 533 | 533 |
+| orbit | `?act=space` | [docs/shots/orbit.png](shots/orbit.png) | 0 | 217 | 667 | 667 |
+| mining | `?act=space&scenario=mining&auto=1&t=20` | [docs/shots/mining.png](shots/mining.png) | 0 | 200 | 383 | 383 |
+| combat-space | `?act=space&scenario=combat&auto=1&t=13` | [docs/shots/combat-space.png](shots/combat-space.png) | 0 | 183 | 317 | 317 |
+| builder | `?act=space&scenario=builder` | [docs/shots/builder.png](shots/builder.png) | 0 | 183 | 300 | 300 |
+
+## Round 7: what each new shot is proof of
+
+Round 7 is play fixes only: `docs/ROUND7.md` section 1 (items 1 to 8) and section 7 (one matter compiler); status of each in `docs/ROUND7-STATUS.md`. Every scenario below carries a condition on the live state; the rules themselves are pinned by ten new property tests (`?test=1`, 53 to 62: the walk through a pile of rocks that killed Leif, the idle audit, deconstruction and condition, belts as paths and the AI only proposing, the planners as items, the collar bin, spoil and the back layer, a tree by energy and by physics, the machine shop and the arm, the migration 6 to 7). `node tools/ui-flow.mjs` (F) lays a belt path, marks, unmarks, removes by a held right button, copies and pastes with a real mouse; `node tools/play.mjs` plays all eight by real input for twenty game minutes with the forest and the hive on, and writes the idle audit to `docs/shots/play.json`.
+
+- `rockwalk` (1): the body sprinted at a pile of fifteen rocks, went over it, came back and stands on it: full health, not one hit (condition: over and back, standing on rock, climbed, no hit).
+- `idleaudit` (2): the J window with the idle audit: open jobs, idle robots, and for each idle robot the reason it takes none of them; what is not a job yet and why (condition: 40 or more samples, none idle beside doable work, nothing given up).
+- `decon` (3): fourteen seconds after one drag of the deconstruction planner over a worn furnace, a chest, five belts and four decks: red marks, a drone taking the furnace apart. `decon-done`: all of it down and in the hold, the furnace kit at the 60 % it was worn to, the chest's iron with it (condition: the counts, the kit's condition, nothing given up).
+- `belts` (4): a belt laid as a path from the furnace's port along the ground, up a lift and along a ledge into the assembler's port, the last cells fast belt; lumps of iron riding it; the ports of the machines marked while a belt is on the cursor (condition: items on the line and on the lift, a lift, a fast belt, iron arrived, no plans).
+- `propose` (4): blueprint mode: the line the AI would lay between a furnace and an assembler, drawn as a proposal; nothing laid, nothing planned (condition: one proposal of eight or more cells, no belt, no ghost). `conveyor`: the same flow two minutes on with nobody answering: still robots, still no belt.
+- `planners` (5): the blueprint, the book, the deconstruction planner and the upgrade planner in slots 1 to 4; the blueprint holds six things and is on the cursor as plans; one paste is being built; three fast belts are planned over belts (condition: the four items, six entities, two pages in the book, the paste, the upgrades).
+- `collar` (6): a shaft rig with no hoist line: the bucket on its rope, the collar bin beside the headframe, a drone carrying from it to the spoil heap; nothing lying down the shaft (condition: over a metre sunk, two or more trips, 25 kg or more hoisted, no body at the face).
+- `spoil` (7): a berm going up east of the base from loose spoil (its outline, the part laid so far), robots carrying to it; the chest that was planned over a hole stands on its pad (condition: the heap sited over 30 m from the wreck, the berm laid or rising, both chests, bodies on the back layer, spoil used).
+- `heap` (7): the spoil heap on the back layer and the body in front of it: it walked from one side of the heap to the other (condition: past it, unhurt, thirty bodies on the back layer, no hit).
+- `trees` (8): the laser on a trunk: char, embers, the kerf part of the way through, the pulses still to go on the HUD (condition: joules in the kerf, thirty or more pulses fired and fewer than the trunk needs, still standing).
+- `felling` (8): two trees marked with the deconstruction planner: sawn by the drones, fallen along the slope, being cut into logs (condition: one or more felled, one or more logs, nothing given up).
+- `shop` (section 7): the J window: the arm's queue first (a furnace and two chips: nothing else here makes them), then the ship's machine shop (the mill on a chest, the powder printer on a camera, the bench waiting for a chip), then the queue (condition: those jobs on those tools, only furnace and chips on the arm, no fabricator anywhere, four shop tools in the wreck).
+- `v6-save` (from the save check): a save written by the round 6 build with its fabricator at work, loaded in this one.
+- `play-rocks`, `play-craft`, `play-furnace`, `play-belt-drag`, `play-belt`, `play-blueprint`, `play-decon`, `play-rig-drag`, `play-tree-kerf`, `play-tree-down`, `play-logs`, `play-collar`, `play-spoil`, `play-audit`, `play-end` (from `tools/play.mjs`), `tools-flow` (from `tools/ui-flow.mjs`): the same by hand.
 
 ## Round 6: what each new shot is proof of
 
@@ -100,7 +133,7 @@ Round 6 is in `docs/ROUND6.md` (Leif's words) and `docs/ROUND6-STATUS.md` (each 
 - `deckrock`: rock that fell on a deck lying on it (condition: a body asleep on a deck).
 - `knowledge`: the planet from far out, dark but for the slice that has been seen; g with a range, the radius unknown (condition: under 400 m known).
 - `v5-save` (from the save check): a save written by the round 5 build, loaded in this one.
-- `play-wake`, `play-boot`, `play-reach`, `play-scan`, `play-kerf`, `play-blocks`, `play-craft`, `play-furnace`, `play-order`, `play-supports`, `play-end` (from `tools/play.mjs`): the new start by hand.
+- `play-wake`, `play-boot`, `play-reach`, `play-scan`, `play-kerf`, `play-blocks` (from `tools/play.mjs`): the round 6 start by hand.
 
 ## Round 5: what each new shot is proof of
 
@@ -124,9 +157,9 @@ Every round 4 scenario also carries a condition on the live game state, evaluate
 - `far90`: 95 degrees east of the crash site and walking on. The camera has turned with gravity: down is the bottom of the screen (condition: longitude over 94, moving).
 - `seam`: walking west across the place where the two charts of the planet meet: nothing shows (condition: the chart changed under the player).
 - `antipode`: the far side, 180 degrees round: the mouth of the hive's main base. The giant never rises here.
-- `autobuild`: four frames placed with no kit anywhere, two minutes on: the fabricator made the kits from the hold, drones built the furnace and the assembler in queue order, the hub still waits for lumen and says so (condition: both machines stand, the hub names lumen).
+- `autobuild`: four frames placed with no kit anywhere, five minutes on: the arm printed the furnace and the assembler (round 7: no machine in the wreck can make either), the mill made the chest, drones built them in queue order, the hub still waits for lumen and says so (condition: both machines stand, both were the arm's, the hub names lumen).
 - `queue`: the AI window (J) on the same scene: the build queue with a reason on every line and arrows to reorder it, logistics, the stock-target editor.
-- `conveyor`: a furnace and an assembler five metres apart on level ground: the AI laid the belt itself and iron rides it; the second furnace, across the wreck, is served by robots, and the reason is on the HUD (condition: eight or more AI belts, one belt route done, one robot route, iron in the assembler).
+- `conveyor`: a furnace and an assembler five metres apart on level ground (round 7: the AI no longer lays the belt by itself): robots carry the iron, the belt is a proposal, and the reason is on the HUD (condition: no belt, no ghost, a proposal, iron in the assembler).
 - `overhang`: ore under a ledge where no drone can drop a line: the six-legged ground hauler walks in under it (condition: the hauler is past the ledge's edge or loaded).
 - `targets`: the stock-target editor: have / target, minus, plus, remove, and the grid of things to keep in stock as well.
 - `ai-flow` (from `tools/ui-flow.mjs`): the same window reached with real keys, after planning a chest in blueprint mode (Tab) and raising the iron target with the + button.

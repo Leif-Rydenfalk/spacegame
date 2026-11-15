@@ -9,7 +9,7 @@
 // bots: [{ id, kind: 'drone' | 'crawler', x, y, wh, whMax, free }]
 // ctx: { cap(bot) kg, speed(bot, kg, n) m/s, power(bot, kg) W, reach(bot, job) -> null or a reason (asked late: it is the
 //        dear one), danger(job) 0..1, fit(bot, job) -> null or a reason (cheap) }
-export const VALUE = { support: 1000, rescue: 900, build: 600, order: 520, feed: 420, output: 320, mine: 260, salvage: 240, clear: 230, tidy: 150, spoil: 110, repair: 200 };
+export const VALUE = { support: 1000, rescue: 900, build: 600, order: 520, feed: 420, output: 320, mine: 260, salvage: 240, clear: 230, tree: 220, tidy: 150, spoil: 110, repair: 200 };
 export function auction(bots, jobs, ctx) {
   const pairs = [], why = new Map(), note = (j, w) => { const m = why.get(j) || {}; m[w] = (m[w] || 0) + 1; why.set(j, m); };
   for (const j of jobs) for (const b of bots) {
@@ -36,8 +36,23 @@ export function auction(bots, jobs, ctx) {
     const r = ctx.reach ? ctx.reach(p.b, p.j) : null; if (r) { note(p.j, r); continue; }
     jobTaken.add(p.j); botTaken.add(p.b); for (const h of helpers) botTaken.add(h); assign.push({ bot: p.b, job: p.j, helpers, cost: p.cost, bid: p.bid });
   }
-  const fails = []; for (const j of jobs) if (!jobTaken.has(j)) { const m = why.get(j); let best = 'every robot is busy', bn = 0; if (m) for (const k in m) if (m[k] > bn || (m[k] === bn && k !== 'every robot is busy')) { bn = m[k]; best = k; } fails.push({ job: j, why: best }); }
+  const fails = []; for (const j of jobs) if (!jobTaken.has(j)) { const m = why.get(j); let best = 'every robot is busy', bn = 0; if (m) for (const k in m) if (m[k] > bn || (m[k] === bn && k !== 'every robot is busy')) { bn = m[k]; best = k; }
+    // a job for one kind of robot that only the other kind turned down: the ones that could take it are at work, and that is the reason
+    if (j.who && /^needs (a drone|the hauler)$/.test(best) && bots.some(b => b.kind === j.who)) best = 'every robot is busy';
+    fails.push({ job: j, why: best }); }
   return { assign, fails, holds };
+}
+// why one robot does not take one job, by the same rules the auction uses (null: it could). The idle audit asks this
+// of every idle robot and every open job, so "idle while there is work" always has a reason that can be read.
+export function whyNot(b, j, ctx) {
+  if (j.who && j.who !== b.kind) return j.who === 'crawler' ? 'needs the hauler' : 'needs a drone';
+  const f = ctx.fit ? ctx.fit(b, j) : null; if (f) return f;
+  const cap = j.cap || ctx.cap(b), kg = j.kg || 0, n = kg > cap + 1e-6 ? (b.kind === 'drone' && j.team ? Math.ceil(kg / cap - 1e-9) : 0) : 1; if (!n) return 'too heavy';
+  const d = Math.hypot(j.x - b.x, j.y - b.y) + (j.d2 || 0), v = ctx.speed(b, kg, n); if (!(v > 0.05)) return 'too heavy';
+  const t = d / v + 4, wh = ctx.power(b, kg / n) * t / 3600; if (wh > b.wh * 0.85) return b.wh < b.whMax * 0.6 ? 'no power: charging first' : 'too far for one charge';
+  const risk = ctx.danger ? ctx.danger(j, b) : 0; if (risk >= 1 && j.kind !== 'rescue' && j.kind !== 'support') return 'danger: waits for cover';
+  if (n > 1) return `needs ${n} drones together: waits for the others`;
+  return ctx.reach ? ctx.reach(b, j) : null;
 }
 // batching: the stops of one trip. Given what a robot can still carry and the open pickups of the same thing going the
 // same way, take the ones nearest the route first, nearest neighbour from the first stop. Returns the chosen pickups.

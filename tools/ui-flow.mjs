@@ -1,7 +1,7 @@
 // tools/ui-flow.mjs: drives the real page with mouse and keys (headless Chromium, software GL): inventory split, drag and
 // drop, suit printer queue, blueprint ghost, combat fire (the round 2 kit, a dev scenario); then the round 3 start: the
 // laser off its hardpoint, the reactor out of its bay, cutting, gathering, dropping, the turret; then title -> new game
-// -> save -> reload -> continue with the same state hash. Then the round 4 flow (D) and the round 5 placing flow (E). Prints five JSON lines and exits 1 on any console error.   usage: npm run build && node tools/ui-flow.mjs
+// -> save -> reload -> continue with the same state hash. Then the round 4 flow (D), the round 5 placing flow (E) and the round 7 tools (F). Prints six JSON lines and exits 1 on any console error.   usage: npm run build && node tools/ui-flow.mjs
 import http from 'node:http'; import fs from 'node:fs'; import path from 'node:path';
 import puppeteer from 'puppeteer-core'; import { fileURLToPath } from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'), dist=path.join(root,'dist'), port=5232, MIME={'.html':'text/html','.js':'text/javascript'};
@@ -18,7 +18,7 @@ const key=async k=>{ await page.keyboard.down(k); await page.evaluate('window.__
 // A: inventory
 await page.goto(U+'?act=surface&scenario=oldkit',{waitUntil:'load'}); await page.waitForFunction('window.__ready===true',{timeout:120000});
 await page.keyboard.press('i'); await page.waitForFunction(`${D}.S.uiOpen===true`,{timeout:30000}); await page.waitForFunction(`document.querySelector('#win .slot[data-c="p"][data-i="5"]')`,{timeout:30000});
-const box=async sel=>{ const b=await (await page.$(sel)).boundingBox(); return [b.x+b.width/2,b.y+b.height/2]; };
+const box=async sel=>{ for(let i=0;i<20;i++){ const e=await page.$(sel), b=e&&await e.boundingBox(); if(b) return [b.x+b.width/2,b.y+b.height/2]; await sleep(250); } throw new Error('no box for '+sel); };      // a window is drawn again whenever what it shows changes: an element may be gone for a moment
 let [x,y]=await box('#win .slot[data-c="p"][data-i="0"]'); await page.mouse.click(x,y,{button:'right'});
 await sleep(1500); [x,y]=await box('#win .slot[data-c="p"][data-i="20"]'); await page.mouse.click(x,y);
 const a1=await page.evaluate(`${D}.S.inv.slots.map(s=>s?s.id+":"+s.n:0).filter(Boolean).join(" ")`);
@@ -82,7 +82,22 @@ await clk('right'); const e5=await page.evaluate(`${D}.BP.ghosts.length`);
 await key('2'); const r0=await page.evaluate(`[${D}.cursorKind(), ${D}.BP.rot]`); await key('r'); const r1=await page.evaluate(`${D}.BP.rot`); await cell(20,3); await key('q'); const e6=await page.evaluate(`[${D}.cursorKind(), ${D}.P.slot]`);
 await key('Tab'); const e7=await page.evaluate(`${D}.S.mode`);
 console.log(JSON.stringify({held:e0, placed:e1, second:e2, pipette:e3, ghost:e4, takenBack:e5, rotate:[r0,r1], cleared:e6, mode:e7, errs}));
-bad += errs.length + (e0[0]==='furnace' && e1[0]===1 && e1[1]===0 && e1[2]===null && e2===1 && e3[0]==='blueprint' && e3[1]==='furnace' && e4==='furnace' && e5===0 && r0[0]==='belt' && r1===-r0[1] && e6[0]===null && e7==='build' ? 0 : 1);
+bad += errs.length + (e0[0]==='furnace' && e1[0]===1 && e1[1]===0 && e1[2]===null && e2===1 && e3[0]==='blueprint' && e3[1]==='furnace' && e4==='furnace' && e5===0 && r0[0]==='belt' && r0[1]===1 && r1===2 && e6[0]===null && e7==='build' ? 0 : 1);
+// F: round 7, with real keys and a real mouse: a belt laid as a dragged path from a machine's port, round a corner and up a
+// lift; the deconstruction planner's box marks it, shift+drag unmarks it; the right button held on the furnace takes it down
+// by hand, as worn as it was; the blueprint copies the line with a box and pastes it as plans
+errs.length=0; await page.goto(U+'?act=surface&scenario=tools7',{waitUntil:'load'}); await page.waitForFunction('window.__ready===true',{timeout:120000});
+const drag=async(a,b,opt={})=>{ await cell(a[0],a[1]); if(opt.shift) await page.keyboard.down('Shift'); await page.mouse.down({button:opt.button||'left'}); await page.evaluate('window.__dev.step(6)'); for(const q of (opt.via||[]).concat([b])) await cell(q[0],q[1]); await page.mouse.up({button:opt.button||'left'}); if(opt.shift) await page.keyboard.up('Shift'); await page.evaluate('window.__dev.step(20)'); };
+await key('5'); const f0=await page.evaluate(`[${D}.cursorKind(), ${D}.S.count("belt")]`);
+await drag([27,0],[33,2],{via:[[33,0]]}); const f1=await page.evaluate(`[${D}.F.machines.filter(m=>m.kind==="belt").map(m=>m.x+","+m.y+">"+m.dir).join(" "), ${D}.S.count("belt"), ${D}.BP.ghosts.length]`);
+await key('3'); await drag([28,0],[33,3]); const f2=await page.evaluate(`[${D}.toolSlot()&&${D}.toolSlot().id, ${D}.F.machines.filter(m=>m.decon).length]`);
+await drag([28,0],[33,3],{shift:true}); const f3=await page.evaluate(`${D}.F.machines.filter(m=>m.decon).length`);
+await key('9'); await cell(26,0); await page.mouse.down({button:'right'}); for(let i=0;i<60 && (await page.evaluate(`${D}.F.machines.some(m=>m.kind==="furnace")`));i++) await page.evaluate("window.__dev.step(120)"); await page.mouse.up({button:'right'}); await page.evaluate('window.__dev.step(10)');
+const f4=await page.evaluate(`(()=>{const s=${D}.S.inv.slots.find(q=>q&&q.id==="furnace"); return [${D}.F.machines.filter(m=>m.kind==="furnace").length, s?s.n:0, s&&s.c!==undefined?+s.c.toFixed(2):1];})()`);
+await key('1'); await drag([28,0],[33,3]); const f5=await page.evaluate(`(()=>{const s=${D}.S.inv.slots[0]; return [s.id, s.d&&s.d.bp?s.d.bp.ents.length:0, s.d&&s.d.bp?s.d.bp.w+"x"+s.d.bp.h:""];})()`);
+await cell(45,0); await clk(); await sleep(1500); const f6=await page.evaluate(`${D}.BP.ghosts.map(g=>g.kind+"@"+g.x+","+g.y+">"+g.dir).join(" ")`); await page.screenshot({path:path.join(root,'docs/shots/tools-flow.png')});
+console.log(JSON.stringify({belt:f0, path:f1, marked:f2, unmarked:f3, byHand:f4, copied:f5, pasted:f6, errs}));
+bad += errs.length + (f0[0]==='belt' && f0[1]===12 && f1[0]==='28,0>1 29,0>1 30,0>1 31,0>1 32,0>1 33,0>2 33,1>2 33,2>2' && f1[1]===4 && f1[2]===0 && f2[0]==='deconstruction planner' && f2[1]===8 && f3===0 && f4[0]===0 && f4[1]===1 && f4[2]===0.5 && f5[0]==='blueprint' && f5[1]===8 && f5[2]==='6x3' && f6.split(' ').length===8 && /belt@47,2>2/.test(f6) ? 0 : 1);
 // B: title, new game, save, reload, continue
 errs.length=0; await page.goto(U,{waitUntil:'load'}); await page.waitForSelector('#title [data-a="t-new"]',{timeout:120000});
 const t0=await page.evaluate(`[!!document.querySelector('[data-a="t-continue"]'), window.__dev.G.paused]`);

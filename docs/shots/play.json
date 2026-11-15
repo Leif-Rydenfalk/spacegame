@@ -1,6 +1,17 @@
 {
- "at": "2026-11-14T22:38:47.560Z",
+ "at": "2026-11-15T08:06:39.600Z",
  "result": "PASS",
+ "idleAudit": {
+  "seconds": 1211,
+  "samples": 2422,
+  "idleWhileAJobWasOpen": 32,
+  "idleBesideDoableWork": 0,
+  "heldByATimerOnly": 0,
+  "worst": [],
+  "reasons": {
+   "needs a drone": 92
+  }
+ },
  "log": [
   {
    "check": "you wake inside the wreck without the suit: no robots, nothing in the hands, the hive and the forest as they are",
@@ -75,7 +86,15 @@
      "copper",
      "o2 cell",
      "water",
-     "ration"
+     "ration",
+     "metal powder",
+     "polymer",
+     "controller",
+     "pcb",
+     "blueprint",
+     "blueprint book",
+     "deconstruction planner",
+     "upgrade planner"
     ]
    }
   },
@@ -84,10 +103,12 @@
    "ok": true,
    "info": {
     "menu": [
+     "metal powder",
      "part",
      "rifle rounds",
      "shells",
      "belt",
+     "fast belt",
      "chest",
      "platform",
      "stairs",
@@ -106,11 +127,13 @@
      "cooling pack",
      "actuators mk2",
      "rifle",
+     "wiring loom",
+     "controller",
      "assay station",
      "shaft rig",
      "assembler"
     ],
-    "reach": "intermediate6.00 kg copper, hold, 4 s  ·  14.0 kg iron, hold, 4 sconsumablesx1 o2 cell, hold, 4 s  ·  x6 ration, hold, 4 s  ·  40.0 L water, hold, 4 s"
+    "reach": "intermediate4.00 kg metal powder, hold, 4 s  ·  5.00 kg polymer, hold, 4 s  ·  6.00 kg copper, hold, 4 s  ·  14.0 kg iron, hold, 4 spartsx1 controller, hold, 4 "
    }
   },
   {
@@ -132,7 +155,7 @@
     "truth": 0.0904,
     "lo": 0.06861174893706738,
     "hi": 0.12742181945455372,
-    "gb": 42.062999999999995,
+    "gb": 42.06399999999999,
     "finds": 15,
     "cap": 8000,
     "guess": [
@@ -147,39 +170,57 @@
    "info": {
     "cuts": 2,
     "top": [
-     12.970894131138545,
-     2.8853324221488306,
+     13.022358733459502,
+     2.890802703082194,
      true,
      true
     ],
-    "freed": 95.94921875,
+    "freed": 101.896484375,
     "pulses": 69,
     "kerfs": 2,
-    "loose": 69.451171875,
+    "loose": 74.775390625,
     "rubble": 0,
     "pieces": 9,
     "heat": 0,
     "loop": true,
-    "hp": 89.8322518511414,
+    "hp": 93.21950976212642,
     "ks": [
      [
-      10.88,
-      1,
-      -0.42,
+      10.89,
+      1.03,
+      -0.44,
       3.2
      ],
      [
-      12.47,
+      12.52,
       2.88,
       -1.94,
       2.32
      ]
     ],
     "at": [
-     12.97,
-     12.88,
+     13.02,
+     12.93,
      3.92
     ]
+   }
+  },
+  {
+   "check": "1 loose rock: the body walks into the blocks it cut, over them and back, and not one rock hurts it",
+   "ok": true,
+   "info": {
+    "pile": [
+     10.5,
+     20.8
+    ],
+    "rocks": 9,
+    "hp": 93.21950976212642,
+    "hits": [],
+    "touched": 379,
+    "climbed": 0.11,
+    "dead": 0,
+    "x": 7.8,
+    "n": 5
    }
   },
   {
@@ -189,107 +230,99 @@
     "ordered": [
      "furnace"
     ],
-    "reach": "raw6.22 kg fibre, loose, 5 s  ·  31.1 kg biomass, loose, 5 s  ·  2.07 L resin, loose, 5 s  ·  65.9 kg basalt, loose, 6 sintermediate6.00 kg copper, hold, 9 s  ·  14.0 kg iron, hold, 12 sconsumablesx1 "
+    "reach": "raw25.0 kg basalt, loose, 6 s  ·  8.16 kg biomass, loose, 7 s  ·  27.1 kg basalt, spoil heap, 25 sintermediate4.00 kg metal powder, hold, 8 s  ·  5.00 kg polymer, hold, 8 s  ·  6.00 kg copper, hold, 9"
    }
   },
   {
-   "check": "robots fetch the rock, the fabricator makes the furnace, a robot brings it",
+   "check": "7s there is no fabricator: the robots bring the rock to you and the arm, the one matter compiler, prints the furnace",
    "ok": true,
    "info": {
-    "s": 216,
+    "s": 151,
     "furnace": 1,
-    "fabDone": 1,
+    "armMade": {
+     "furnace": 1
+    },
+    "shop": [],
     "delivered": [
      [
       "basalt",
-      15,
+      12.1,
       "zone",
       "drone"
      ],
      [
       "basalt",
       15,
-      "zone",
-      "drone"
-     ],
-     [
-      "basalt",
-      15,
-      "inv",
-      "drone"
-     ],
-     [
-      "fibre",
-      1.6,
-      "zone",
-      "drone"
-     ],
-     [
-      "basalt",
-      15,
-      "inv",
-      "drone"
-     ],
-     [
-      "basalt",
-      7.4,
-      "inv",
-      "drone"
-     ],
-     [
-      "resin",
-      2.1,
-      "zone",
-      "drone"
-     ],
-     [
-      "biomass",
-      7.8,
       "zone",
       "drone"
      ],
      [
       "fibre",
-      3.1,
+      6.1,
       "zone",
       "drone"
      ],
      [
       "basalt",
-      58.5,
-      "zone",
-      "crawler"
-     ],
-     [
-      "basalt",
-      58.5,
-      "inv",
-      "crawler"
-     ],
-     [
-      "biomass",
-      8.3,
-      "zone",
-      "drone"
-     ]
-    ],
-    "toYou": [
-     [
-      "furnace",
-      1,
+      15,
       "player",
+      "drone"
+     ],
+     [
+      "basalt",
+      15,
+      "player",
+      "drone"
+     ],
+     [
+      "basalt",
+      10,
+      "player",
+      "drone"
+     ],
+     [
+      "basalt",
+      49.8,
+      "zone",
+      "crawler"
+     ],
+     [
+      "basalt",
+      12.1,
+      "player",
+      "drone"
+     ],
+     [
+      "basalt",
+      15,
+      "player",
+      "drone"
+     ],
+     [
+      "log",
+      8.2,
+      "zone",
+      "drone"
+     ],
+     [
+      "biomass",
+      8.2,
+      "zone",
+      "drone"
+     ],
+     [
+      "log",
+      9,
+      "zone",
       "crawler"
      ]
     ],
     "gave": [],
-    "retries": 2,
+    "retries": 0,
     "log": [
      "network up: two drones and the hauler released",
      "ai online: one system, and you are part of it",
-     "drone 2: no progress to fibre at 25 m e; tried again another way",
-     "fibre at 25 m e: no progress",
-     "furnace: too heavy: 40 kg needs 3 drones",
-     "hauler 3: the trip took too long to fibre at 25 m e; tried again another way"
+     "spoil heap sited 42 m west of the wreck: level ground, clear of the base"
     ],
     "orders": [
      [
@@ -298,7 +331,7 @@
       "every furnace is on an earlier order"
      ]
     ],
-    "hp": 63.45969476884515
+    "hp": 93.21950976212642
    }
   },
   {
@@ -306,7 +339,7 @@
    "ok": true,
    "info": {
     "gave": [],
-    "retries": 2
+    "retries": 0
    }
   },
   {
@@ -316,107 +349,395 @@
     "furnace": 1,
     "left": 0,
     "msg": "ai: the cable swings like a pendulum. g is 8.725 ± 0.044 m/s2",
-    "cur": null,
-    "slot": 0,
-    "mode": "build",
-    "ghosts": [],
     "at": [
-     6.772721835224161,
-     4.577525506616766,
-     0.2538861187058501
+     [
+      9,
+      0
+     ]
     ]
    }
   },
   {
-   "check": "a mining order: a pit cut by hand, a drift marked from it in blueprint mode",
+   "check": "7s the belts come from the mill in the wreck (bar in, a fifth lost as swarf), not from the arm",
    "ok": true,
    "info": {
-    "pit": [
-     false,
-     true
-    ],
-    "ord": [
-     [
-      18,
-      -2,
-      19.5,
-      -1
-     ]
-    ],
-    "collapses": []
-   }
-  },
-  {
-   "check": "the drones cut the drift; the ai planned its support by itself, had it made, and a drone set it",
-   "ok": true,
-   "info": {
-    "s": 140,
-    "supports": [
-     [
-      "steel set",
-      18.25,
-      -1.59,
-      -1.18
-     ]
-    ],
-    "planned": 1,
-    "built": 1,
-    "collapses": [],
-    "spans": [
-     [
-      1.3,
-      1.3
-     ]
-    ],
-    "clears": 1,
-    "gave": [],
-    "cut": 0,
+    "s": 44,
+    "belts": 8,
+    "swarf": 1.2,
+    "arm": {
+     "furnace": 1
+    },
+    "armQ": [],
     "log": [
      "network up: two drones and the hauler released",
      "ai online: one system, and you are part of it",
-     "drone 2: no progress to fibre at 25 m e; tried again another way",
-     "fibre at 25 m e: no progress",
-     "furnace: too heavy: 40 kg needs 3 drones",
-     "hauler 3: the trip took too long to fibre at 25 m e; tried again another way",
-     "hauler 3: the trip took too long to soil at 2 m e; tried again another way"
+     "spoil heap sited 42 m west of the wreck: level ground, clear of the base"
     ],
-    "ghosts": [],
-    "hp": 63.45969476884515,
-    "robots": [
-     "cutting the marked ground",
-     "docked, charging",
-     "docked: nothing to do"
+    "orders": []
+   }
+  },
+  {
+   "check": "4 a belt is laid as a dragged path from the furnace port, with its direction; the ai laid none",
+   "ok": true,
+   "info": {
+    "belts": [
+     [
+      11,
+      0,
+      1
+     ],
+     [
+      12,
+      0,
+      1
+     ],
+     [
+      13,
+      0,
+      1
+     ],
+     [
+      14,
+      0,
+      1
+     ],
+     [
+      15,
+      0,
+      1
+     ]
+    ],
+    "left": 3,
+    "ghosts": 0,
+    "auto": 0,
+    "laid": 0
+   }
+  },
+  {
+   "check": "what the furnace makes rides the belt, visibly",
+   "ok": true,
+   "info": {
+    "s": 47.5,
+    "fed": "by hand",
+    "rockIn": 27.1,
+    "before": [
+     [
+      "slag",
+      11.23
+     ]
+    ],
+    "after": [
+     [
+      "slag",
+      13.03
+     ]
+    ],
+    "furnace": [
+     [
+      true,
+      {
+       "basalt": 56.241365081097754
+      },
+      {
+       "iron": 0.4524095435129722,
+       "oxygen": 1.8096381740518888,
+       "silicon": 1.3572286305388042,
+       "slag": 0.035842945808110226
+      }
+     ]
     ]
    }
   },
   {
-   "check": "to the end: no robot gave a job up, nobody died, and nothing that lives was switched off",
+   "check": "5 the planners are items in slots: the blueprint copies the line with a dragged box and pastes it as plans",
    "ok": true,
    "info": {
+    "inInv": [
+     1,
+     1,
+     1,
+     1
+    ],
+    "copied": {
+     "id": "blueprint",
+     "ents": [
+      "belt@0,0>1",
+      "belt@1,0>1",
+      "belt@2,0>1",
+      "belt@3,0>1",
+      "belt@4,0>1"
+     ],
+     "tool": "blueprint"
+    },
+    "pasted": [
+     [
+      "belt",
+      11,
+      5,
+      1
+     ],
+     [
+      "belt",
+      12,
+      5,
+      1
+     ],
+     [
+      "belt",
+      13,
+      5,
+      1
+     ],
+     [
+      "belt",
+      14,
+      5,
+      1
+     ],
+     [
+      "belt",
+      15,
+      5,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "check": "3 deconstruction: a held right button takes one belt down by hand; the planner box cancels the plans and the robots take the line down and keep the belts",
+   "ok": true,
+   "info": {
+    "tHand": 0.9,
+    "before": [
+     5,
+     12
+    ],
+    "hand": {
+     "belts": 4,
+     "held": 4,
+     "ev": 1
+    },
+    "marks": {
+     "marked": [
+      "belt",
+      "belt",
+      "belt",
+      "belt",
+      "belt",
+      "belt",
+      "belt"
+     ],
+     "unmarked": 0,
+     "ghosts": 0,
+     "msg": "to take down: 7 machines, 2 plans. the robots do it and bring the parts to stock"
+    },
+    "s": 18.5,
+    "done": {
+     "belts": 0,
+     "all": 12,
+     "decon": 7,
+     "furnace": 1,
+     "gave": 0
+    }
+   }
+  },
+  {
+   "check": "6 the shaft rig is the arm's work (no machine here makes one); it is placed with a dragged depth",
+   "ok": true,
+   "info": {
+    "s": 56,
+    "rig": 1,
+    "arm": {
+     "furnace": 1,
+     "shaft rig": 1
+    },
+    "orders": [],
+    "log": [
+     "network up: two drones and the hauler released",
+     "ai online: one system, and you are part of it",
+     "spoil heap sited 42 m west of the wreck: level ground, clear of the base"
+    ],
+    "placed": [
+     {
+      "x": -3,
+      "y": 0,
+      "target": 4,
+      "head": "pulse",
+      "hoist": false
+     }
+    ],
+    "ground": 0.002002952755905507
+   }
+  },
+  {
+   "check": "8 a tree is hard to cut: the trunk takes about as many pulses as its kerf costs, then it falls and lies",
+   "ok": true,
+   "info": {
+    "tree": {
+     "id": "32105,0",
+     "x": -18.841711198003033,
+     "y": 0.065,
+     "d": 0.6913577847563259,
+     "H": 13.045259491877532,
+     "need": 129
+    },
+    "mode": "spall",
+    "mid": {
+     "k": 744000,
+     "st": 0,
+     "note": "trunk 0.69 m: the beam chars more than it cuts. kerf 24 %, about 98 pulses to go"
+    },
+    "pulses": 129,
+    "tFell": 10.6,
+    "tDown": 2.9,
+    "turret": true,
+    "rec": {
+     "st": 2,
+     "ang": 1.4,
+     "dir": -1
+    },
+    "hp": 93.21950976212642
+   }
+  },
+  {
+   "check": "8 felling is a job: the drones cut the trunk that lies into logs",
+   "ok": true,
+   "info": {
+    "s": 0,
+    "logs": 6,
+    "felled": 2,
+    "bucked": 6,
+    "loose": 42.2,
+    "stored": 42.2,
+    "robots": [
+     "carrying 8 kg fibre to the organics",
+     "cutting the trunk into logs: 0 cut",
+     "docked: no job it can take"
+    ]
+   }
+  },
+  {
+   "check": "6 the rig hoisted everything it cut to the collar bin: nothing lies at the face",
+   "ok": true,
+   "info": {
+    "depth": 1.6,
+    "trips": 99,
+    "hoisted": 46.2,
+    "bin": 2.7,
+    "muck": {
+     "soil": 0.1318359375
+    },
+    "wait": "",
+    "atFace": 0,
+    "skips": 99
+   }
+  },
+  {
+   "check": "7 spoil goes to a heap the ai sited away from the base, on the back layer (and into a berm when there is enough of it)",
+   "ok": true,
+   "info": {
+    "zones": [
+     [
+      "spoil heap",
+      -51,
+      22
+     ],
+     [
+      "organics",
+      -30,
+      159
+     ],
+     [
+      "ore bin",
+      -16,
+      0
+     ]
+    ],
+    "back": 32,
+    "front": 0,
+    "fills": [
+     [
+      "berm",
+      18.5,
+      16,
+      25,
+      false
+     ]
+    ],
+    "used": 0,
+    "span": {
+     "x0": -15,
+     "x1": 5.5,
+     "n": 2
+    },
+    "ship": -9
+   }
+  },
+  {
+   "check": "2 twenty minutes of play: not one sample with a robot idle beside a job it could take",
+   "ok": true,
+   "info": {
+    "seconds": 1210,
+    "samples": 2419,
+    "idleWhileOpen": 32,
+    "doable": 0,
+    "timer": 0,
+    "worst": [],
+    "reasons": [
+     [
+      "needs a drone",
+      92
+     ]
+    ],
+    "latent": [],
+    "gave": 0,
+    "retries": 0,
+    "delivered": 69
+   }
+  },
+  {
+   "check": "to the end: no robot gave a job up, nobody died, no rock hurt anybody, and nothing that lives was switched off",
+   "ok": true,
+   "info": {
+    "fights": [
+     {
+      "at": 903,
+      "how": "turret",
+      "s": 3.3,
+      "hp": 61,
+      "dead": false,
+      "kills": {}
+     }
+    ],
     "gave": [],
-    "retries": 3,
+    "retries": 0,
     "deaths": [],
-    "hp": 63.45969476884515,
-    "time": 511,
+    "hp": 61.21950976212642,
+    "time": 1282,
     "stage": 3,
     "creatures": 9,
     "quiet": false,
     "kills": {},
     "zones": [
      [
-      "rock pile",
-      57
+      "spoil heap",
+      22
      ],
      [
       "organics",
-      40
+      159
      ],
      [
-      "rubble yard",
-      1
+      "ore bin",
+      0
      ]
     ],
-    "suit": 0.956,
+    "suit": 0.953,
+    "arm": 0.92,
+    "armMade": {
+     "furnace": 1,
+     "shaft rig": 1
+    },
     "hive": [
      {
       "hive:-4": 0,
@@ -428,7 +749,8 @@
      0,
      0
     ],
-    "pulses": 525
+    "pulses": 236,
+    "rockHits": []
    }
   },
   {

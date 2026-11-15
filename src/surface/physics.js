@@ -90,3 +90,20 @@ export const makeTime = (kg, W, e = E_COMPILE) => kg * e / W;
 export function wireLoss(W, metres, mm2 = 50, volts = 800) { const I = W / volts, R = 1.72e-8 * metres * 2 / (mm2 * 1e-6); return Math.min(W, I * I * R); }
 // a radio link: Mbit/s at this distance for an antenna of this reach (inverse square from 1 Gbit/s at a tenth of it)
 export const linkMbit = (d, range) => d > range ? 0 : Math.min(1000, 1000 * Math.pow(range * 0.1 / Math.max(d, 1), 2));
+
+// ---- wood (round 7) ---------------------------------------------------------------------------------------------------
+// A laser is a poor axe. Wood does not spall like rock: it has to be heated through the boiling of its water and its
+// own pyrolysis (about 6 MJ per kg of green wood removed), and a pulsed beam chars the face it works on, so most of
+// what arrives heats the char and the smoke: about a third does work. A trunk of diameter d needs a kerf right
+// through it (2 cm wide, like the slot in rock; the world is a slice SLAB thick, as everywhere).
+// A saw chain cuts the same trunk by feed, a couple of centimetres a second, with a notch first: that is the drones' tool.
+export const WOOD = { rho: 650, ablate: 6.0e6, charEff: 0.35, kerf: 0.02, feed: 0.02, notch: 1.3, section: 1.2, taper: 0.5, trunk: 0.7 };
+// joules a kerf through a trunk of diameter d takes, and the pulses that is
+export const kerfWoodJ = d => d * WOOD.kerf * SLAB * WOOD.rho * WOOD.ablate / WOOD.charEff;
+export const pulsesToFell = d => Math.ceil(kerfWoodJ(d) / (PULSE_BEAM_J * LASERP.absorb));
+// seconds a saw needs through it
+export const sawTime = d => d / WOOD.feed * WOOD.notch;
+// the trunk of a tree H tall and d thick at the foot: how many logs, how long each is, and the kg of log i (it tapers)
+export function logsOf(H, d) { const L = H * WOOD.trunk, n = Math.max(1, Math.round(L / WOOD.section)), len = L / n; return { n, len, d: i => d * (1 - WOOD.taper * (i + 0.5) / n), kg: i => d * (1 - WOOD.taper * (i + 0.5) / n) * len * SLAB * WOOD.rho }; }
+// a rod falling about its foot: angular acceleration at angle a from the vertical
+export const fallAcc = (H, a, g = 8.7) => 1.5 * g / Math.max(1, H) * Math.sin(a);

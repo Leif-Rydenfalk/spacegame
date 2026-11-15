@@ -198,7 +198,8 @@ export function stepCreatures(dt) {
       c.stuck += dt; c.vx = 0;
       if (c.state === 'wander' || (c.state === 'flee' && !c.agg && c.stuck > 0.5 && dist > 6)) c.dir = -c.dir;
       else if (c.stuck > 0.5) { const up = groundY(c.x + mv * 0.9, c.y + 3.2, 0, 3.4); if (up !== null) { c.x += mv * dt * 3; c.y += (up + k.clear - c.y) * Math.min(1, dt * 3); } else if (c.type === 'brute') world.dig(c.x + mv * 1.1, c.y + 0.3, 0.9, dt * 2.5, undefined, q => q === M.XENO || q === M.STEEL); else if (c.stuck > 3) { c.goal = null; c.state = 'wander'; c.t = 3; c.dir = -c.dir; c.stuck = 0; } }
-    } else { c.stuck = 0; c.x += c.vx * dt; const gy = ahead + k.clear; if (c.y > gy + 0.4) { c.vy -= GRAV * dt; c.y = Math.max(gy, c.y + c.vy * dt); } else { c.vy = 0; c.y += (gy - c.y) * Math.min(1, dt * 14); } }
+    } else { c.stuck = 0; const steep = ahead - (c.y - k.clear) > 0.17; c.climb = steep ? 0.3 : Math.max(0, (c.climb || 0) - dt);       /* a steep bank of loose rock (a berm, a spoil slope) is climbed at a third of the pace: two steps up, one back */
+      c.x += c.vx * dt * (c.climb > 0 ? 0.34 : 1); const gy = ahead + k.clear; if (c.y > gy + 0.4) { c.vy -= GRAV * dt; c.y = Math.max(gy, c.y + c.vy * dt); } else { c.vy = 0; c.y += (gy - c.y) * Math.min(1, dt * 14); } }
     N[0].x = c.x; N[0].y = c.y + Math.sin(c.seed + c.x * 3) * 0.02;
     for (let j = 1; j < N.length; j++) {
       const n = N[j], q = N[j - 1], g = groundY(n.x, n.y, 1.2 + k.clear); if (g !== null) n.y += (g + k.clear * (1 - j * 0.04) - n.y) * Math.min(1, dt * 10);

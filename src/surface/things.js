@@ -30,13 +30,21 @@ Object.assign(DEFS, {
   'power pole': { w: 1, h: 4, hp: 60 }, camera: { w: 1, h: 2, hp: 30 }, radar: { w: 1, h: 2, hp: 60 },
   pump: { w: 1, h: 1, hp: 60, noise: 8, poll: 0 }, 'air filter': { w: 1, h: 1, hp: 30 }, controller: { w: 1, h: 1, hp: 30 },
   seat: { w: 1, h: 1, hp: 40 }, table: { w: 1, h: 1, hp: 40 }, bunk: { w: 2, h: 1, hp: 60 }, stairs: { w: 1, h: 1, hp: 60 },
+  // round 7: the machine-shop gear, once it is out of the wreck: the same tools, on the base grid, fed by the robots
+  'cnc mill': { w: 2, h: 2, hp: 180, noise: 22, poll: 0.05 }, 'metal printer': { w: 2, h: 2, hp: 120, noise: 6, poll: 0.02 }, 'polymer printer': { w: 1, h: 2, hp: 60, noise: 4, poll: 0.02 }, 'solder bench': { w: 2, h: 1, hp: 60, noise: 2, poll: 0.01 },
 });
-export const RIG = { pulseW: 30000, pulseE: 0.75e9, rotaryE: 0.15e9, width: 1.0, free: 2, skip: 40, drift: 1.8 };
+// round 7: the rig hoists everything it cuts. A sinking bucket (the kibble, 25 kg) comes with every rig; a hoist line
+// makes it a 60 kg skip. What comes up is tipped into the collar bin at the surface (the rig's output: 400 kg), where
+// the robots, or a belt at either port, take it away. Nothing is left at the face; a full bin stops the rig.
+export const RIG = { pulseW: 30000, pulseE: 0.75e9, rotaryE: 0.15e9, width: 1.0, free: 2, kibble: 25, skip: 60, drift: 1.8, bin: 400, face: 90 };
+export const binKg = m => { let s = 0; for (const k in m.out) s += m.out[k] * ITEMS[k].m; return s; };
 F.rock = rockLumps;
 F.onPlace = m => { if (m.kind === 'shaft rig') { m.depth = 0; m.target = m.target || 4; m.head = 'pulse'; m.hoist = false; m.branches = []; m.paid = RIG.free; m.hoistT = 0; m.muck = {}; } if (m.kind === 'stairs') addPlat(m.x, m.y); };
-F.onRemove = m => { if (m.kind === 'stairs') removePlat(m.x, m.y); };
+F.onRemove = m => { if (m.kind === 'stairs') removePlat(m.x, m.y); if (m.kind === 'shaft rig' && (m.depth || 0) > 1 && F.onShaftGone) F.onShaftGone(m); };
 const out = (m, id, n) => { m.out[id] = (m.out[id] || 0) + n; };
 // metres the rig may still sink with the rods and casing it has been given
+// the upgrade planner asks a rig for the modules it lacks: the robots bring them when they exist
+export const rigMods = m => m.upMods ? { 'rotary head': m.head === 'rotary' || (m.inp['rotary head'] || 0) >= 1 ? 0 : 1, 'hoist line': m.hoist || (m.inp['hoist line'] || 0) >= 1 ? 0 : 1 } : {};
 export const rigNeeds = m => { const want = Math.max(0, Math.ceil((m.target || 0) + (m.branches || []).reduce((a, b) => a + b.len, 0) - m.paid - 1e-6)), have = Math.min(m.inp['drill rod'] || 0, m.inp.casing || 0); return { rods: Math.max(0, Math.min(want, 4) - (m.inp['drill rod'] || 0)), casing: Math.max(0, Math.min(want, 4) - (m.inp.casing || 0)), want, have }; };
 F.stepExtra = (m, dt, pw) => {
   const cx = (m.x + m.w / 2) * TS, y0 = m.y * TS;
@@ -46,16 +54,19 @@ F.stepExtra = (m, dt, pw) => {
       if (m.done > 2 && q.ox !== undefined && !m.marked) { m.marked = true; const n = mark(q.ox, q.oy, 3, 2); GEO.assays++; events.emit('assayed', { x: q.ox, y: q.oy, fe: q.fe, cells: n }); S.say(`assay: the sample is ${(q.fe * 100).toFixed(1)} % iron${q.cu > 0.003 ? ', ' + (q.cu * 100).toFixed(2) + ' % copper' : ''}${q.lm > 0.0005 ? ', ' + (q.lm * 100).toFixed(2) + ' % lumen' : ''}: the ground it came from is known to 1 % now`, 5); }
       if (m.inp.rubble < 0.01) { m.marked = false; m.done = 0; } }
   } else if (m.kind === 'shaft rig') {
+    if (!m.muck) m.muck = {}; if (!(m.hoistT >= 0)) m.hoistT = 0; if (!m.branches) m.branches = [];
     // modules that arrived are fitted
     if ((m.inp['rotary head'] || 0) >= 1 && m.head !== 'rotary') { m.inp['rotary head'] -= 1; m.head = 'rotary'; events.emit('rigModule', 'rotary head'); S.say('shaft rig: rotary head fitted', 3); }
-    if ((m.inp['hoist line'] || 0) >= 1 && !m.hoist) { m.inp['hoist line'] -= 1; m.hoist = true; events.emit('rigModule', 'hoist line'); S.say('shaft rig: hoist line fitted. the muck comes up in the skip', 3); }
+    if ((m.inp['hoist line'] || 0) >= 1 && !m.hoist) { m.inp['hoist line'] -= 1; m.hoist = true; events.emit('rigModule', 'hoist line'); S.say('shaft rig: hoist line fitted. a 60 kg skip in place of the bucket', 3); }
     const nd = rigNeeds(m), br = (m.branches || []).find(b => b.done < b.len && m.depth >= b.depth - 0.05), sinking = m.depth < (m.target || 0) - 1e-3, work = sinking || !!br;
-    m.wants = { 'drill rod': nd.rods, casing: nd.casing };
+    m.wants = { 'drill rod': nd.rods, casing: nd.casing, ...rigMods(m) }; if (m.upMods && m.head === 'rotary' && m.hoist) m.upMods = false;
     // the string's mass and the rock's torque set the power it needs: more string, more of its 30 kW goes to turning it
     const len = m.depth + (m.branches || []).reduce((a, b) => a + b.done, 0), eff = 1 / (1 + len * 0.02), E = m.head === 'rotary' ? RIG.rotaryE : RIG.pulseE, rate = RIG.pulseW * pw * eff / (E * SLAB);       // m2 of face per second
     const paidFor = m.paid - len; m.wait = '';
     if (work && paidFor <= 0.02) { if (nd.have >= 1) { m.inp['drill rod'] -= 1; m.inp.casing -= 1; m.paid += 1; } else m.wait = `waits for ${(m.inp['drill rod'] || 0) < 1 ? 'a drill rod' : 'casing'}: one of each for the next metre`; }
-    m.on = work && pw > 0.05 && !m.wait && Object.values(m.muck).reduce((a, b) => a + b, 0) < 120;
+    const atFace = Object.values(m.muck).reduce((a, b) => a + b, 0), bin = binKg(m);
+    if (work && !m.wait && bin >= RIG.bin) m.wait = `the collar bin is full (${bin.toFixed(0)} kg): waits for the robots or a belt`;
+    m.on = work && pw > 0.05 && !m.wait && atFace < RIG.face;
     if (m.on) {
       const adv = Math.min(rate / (sinking ? RIG.width : RIG.drift) * dt, m.paid - len, 0.05), acc = {}; let fx, fy;
       if (sinking) { fx = cx; fy = y0 - m.depth - adv; world.box(cx - RIG.width / 2, fy, cx + RIG.width / 2, y0 - 0.02, -1, 0, acc); m.depth += adv; }
@@ -63,10 +74,9 @@ F.stepExtra = (m, dt, pw) => {
       for (const k in acc) if (acc[k] > 0 && MAT[k].item) for (const [id, kg, q] of rockLumps(+k, acc[k], fx, fy)) { m.muck[id] = (m.muck[id] || 0) + kg; if (q) m.q = mixQ(m.q, (m.muck[id] || 0) - kg, q, kg); }
       if (Math.random() < dt * 4) env.noise(fx, fy, m.head === 'rotary' ? 30 : 18);
     }
-    // the muck: with a hoist a skip of 40 kg rides up at 2.5 m/s and tips at the collar; without one it lies at the bottom
-    const mk = Object.keys(m.muck).find(k => m.muck[k] > 0.01);
-    if (mk && m.hoist) { m.hoistT -= dt; if (m.hoistT <= 0) { const n = Math.min(RIG.skip, m.muck[mk]); m.muck[mk] -= n; out(m, mk, n); m.hoistT = 2 * Math.max(1, m.depth) / HOIST_V + 6; m.trips = (m.trips || 0) + 1; events.emit('skip', { kg: n, depth: m.depth }); } }
-    else if (mk && m.muck[mk] > 12) { const n = m.muck[mk]; m.muck[mk] = 0; if (mk === 'rubble' && m.q) inv.nextQ = m.q; matter.spawn(mk, n, cx + rand(-0.2, 0.2), y0 - m.depth + 0.4, 0, 0); }
+    // the muck rides up: the bucket takes its load at the face, rises at 2.5 m/s, tips into the collar bin and goes back down
+    const mk = Object.keys(m.muck).find(k => m.muck[k] > 0.01), room = RIG.bin - bin;
+    if (mk && room > 1) { m.hoistT -= dt; if (m.hoistT <= 0) { const n = Math.min(m.hoist ? RIG.skip : RIG.kibble, m.muck[mk], room); m.muck[mk] -= n; out(m, mk, n); m.hoistT = 2 * Math.max(1, m.depth) / HOIST_V + (m.hoist ? 4 : 6); m.hoistT0 = m.hoistT; m.trips = (m.trips || 0) + 1; m.hoisted = (m.hoisted || 0) + n; events.emit('skip', { kg: n, depth: m.depth }); } }
     if (!work && !m.told && m.depth > 0.5) { m.told = true; events.emit('shaftDone', { depth: m.depth }); } if (work) m.told = false;
   } else if (m.kind === 'pump') {         // with a filter and a controller within 2 m and power: oxygen out of the air, 0.6 g a second
     const near = k => F.machines.some(q => q.kind === k && Math.abs(q.x - m.x) <= 4 && Math.abs(q.y - m.y) <= 3); m.ready = near('air filter') && near('controller'); m.on = m.ready && pw > 0.2 && (m.out.oxygen || 0) < 12;
@@ -88,8 +98,22 @@ F.drawExtra = (b, m, time, a, ghost, A, md) => {
     b.seg(cx, y + 0.98, cx, y - dep + 0.25, 0.03, mul(C.steel, 0.9), 1, 0, 1); b.add(cx, y - dep + 0.16, m.head === 'rotary' ? 0.5 : 0.24, 0.22, on ? time * 9 : 0, m.head === 'rotary' ? mul(C.steel, 1.1) : mul(C.amber, on ? 3 + Math.sin(time * 40) : 0.6), 1, m.head === 'rotary' ? 4 : 0, m.head === 'rotary' ? 1 : 2);
     for (let d = 0.5; d < dep; d += 1) for (const s of [-1, 1]) b.add(cx + s * (RIG.width / 2 + 0.02), y - d, 0.05, 0.9, 0, mul(C.steel, 0.5), 1, 0, 1, d);       // casing
     for (const br of m.branches || []) if (br.done > 0.1) b.add(cx + br.dir * (RIG.width / 2 + br.done / 2), y - br.depth + RIG.drift, br.done, 0.05, 0, mul(C.steel, 0.5), 1, 0, 1);
-    if (m.hoist && dep > 0.5) { const T = 2 * Math.max(1, dep) / HOIST_V + 6, u = clamp(1 - (m.hoistT || 0) / T, 0, 1), sy = y - dep * (u < 0.5 ? 1 - u * 2 : 0) + 0.3; b.seg(cx + 0.22, y + 0.98, cx + 0.22, sy, 0.012, mul(C.steel, 1.2), 1, 0, 1); b.add(cx + 0.22, sy - 0.12, 0.24, 0.26, 0, mul(C.hull, 0.4), 1, 0, 1, 7); }
+    if (dep > 0.3) { const T = m.hoistT0 || 8, u = clamp(1 - (m.hoistT || 0) / T, 0, 1), sy = y - dep * (u < 0.5 ? 1 - u * 2 : 0) + 0.3, bw = m.hoist ? 0.3 : 0.2; b.seg(cx + 0.22, y + 0.98, cx + 0.22, sy, 0.012, mul(C.steel, 1.2), 1, 0, 1); b.add(cx + 0.22, sy - 0.12, bw, bw + 0.04, 0, mul(C.hull, 0.4), 1, 0, 1, 7); }       // the bucket on its rope
+    { const f = Math.min(1, binKg(m) / RIG.bin), bx = cx + 0.34, k0 = Object.keys(m.out).find(k => m.out[k] > 0.5);       // the collar bin, and how full it is
+      b.add(bx, y + 0.24, 0.5, 0.46, 0, mul(C.steel, 0.42), 1, 0, 1, 9); b.add(bx, y + 0.47, 0.56, 0.05, 0, mul(C.steel, 0.9), 1, 0, 1); if (f > 0.01) b.add(bx, y + 0.04 + f * 0.2, 0.42, f * 0.4, 0, mul(k0 ? ITEMS[k0].c || C.steel : C.steel, 0.9), 1, 0, 1, 3); b.add(bx + 0.2, y + 0.4, 0.04, 0.04, 0, mul(f > 0.95 ? C.red : f > 0.5 ? C.amber : C.acid, 2), 1, 1, 2); }
     b.add(cx - 0.3, y + 0.2, 0.06, 0.06, 0, mul(m.wait ? C.amber : on ? C.acid : C.steel, 2), 1, 1, 2); if (on) light.emit(cx / TS, (y - dep) / TS, 0.5, 0.3, 0.1);
+  } else if (m.kind === 'cnc mill') {       // a bed, a column, the spindle on its slide, chips in the tray
+    const sx = cx + Math.sin(time * 1.7 + m.seed) * 0.22 * (on ? 1 : 0.1); A(cx, y + 0.22, w, 0.44, 0, mul(C.steel, 0.5), 1, 0, md, 3); A(cx - w / 2 + 0.14, y + 0.62, 0.2, 0.8, 0, mul(C.steel, 0.62), 1, 0, md, 4); A(cx, y + 0.94, w - 0.1, 0.08, 0, mul(C.steel, 0.9)); A(sx, y + 0.78, 0.16, 0.26, 0, C.dark, 1, 0, md, 5); A(sx, y + 0.6, 0.04, 0.14, on ? time * 30 : 0, mul(C.steel, 1.4));
+    if (!ghost) { b.add(cx + w / 2 - 0.12, y + 0.36, 0.05, 0.05, 0, mul(on ? C.acid : C.amber, 2.2), 1, 1, 2); if (on && Math.random() < 0.3) S.parts.spawn({ x: sx, y: y + 0.52, vx: rand(-1.5, 1.5), vy: rand(0.2, 1.6), life: rand(0.2, 0.5), size: 0.02, c: [2.2, 2.4, 2.6], col: 1, bounce: 0.3 }); }
+  } else if (m.kind === 'metal printer') {      // a sealed chamber with a window; the laser's spot crossing the bed
+    A(cx, y + h / 2 - 0.05, w - 0.06, h - 0.1, 0, mul(C.hull, 0.3), 1, 0, md, 3); A(cx, y + 0.58, w * 0.56, 0.36, 0, [0.01, 0.012, 0.016]); A(cx, y + 0.12, w, 0.24, 0, mul(C.steel, 0.5), 1, 0, md, 4);
+    if (!ghost) { if (on) { const px = cx + Math.sin(time * 9 + m.seed) * w * 0.2; b.add(px, y + 0.46, 0.06, 0.06, 0, [5, 3, 1.2], 1, 1, 2); b.add(px, y + 0.5, 0.5, 0.3, 0, [1.2, 0.6, 0.2], 0.5, 1, 2); light.emit(m.x + 1, m.y + 1, 0.5, 0.3, 0.1); } b.add(cx + w / 2 - 0.14, y + h - 0.2, 0.05, 0.05, 0, mul(on ? C.acid : C.amber, 2), 1, 1, 2); }
+  } else if (m.kind === 'polymer printer') {     // a frame, a bed, a head on a gantry, a spool
+    for (const d of [-1, 1]) A(cx + d * 0.2, y + 0.42, 0.03, 0.84, 0, mul(C.steel, 0.8), 1, 0, md); A(cx, y + 0.84, 0.46, 0.04, 0, mul(C.steel, 0.9)); A(cx, y + 0.08, 0.42, 0.06, 0, C.dark, 1, 0, md); A(cx + Math.sin(time * 2.3 + m.seed) * 0.12 * (on ? 1 : 0), y + 0.5, 0.1, 0.1, 0, mul(C.hull, 0.5), 1, 0, md); A(cx + 0.14, y + 0.94, 0.16, 0.16, on ? time : 0, mul(C.amber, 0.5), 1, 1, md);
+    if (!ghost && on) b.add(cx, y + 0.42, 0.04, 0.04, 0, mul(C.amber, 2.5), 1, 1, 2);
+  } else if (m.kind === 'solder bench') {       // a bench, a lamp arm, a board under it, the iron's point
+    A(cx, y + 0.38, w, 0.06, 0, mul(C.steel, 0.9)); for (const d of [-1, 1]) A(cx + d * (w / 2 - 0.08), y + 0.18, 0.05, 0.36, 0, mul(C.steel, 0.6)); A(cx - 0.2, y + 0.43, 0.26, 0.03, 0, [0.04, 0.2, 0.1], 1, 0, md); b.seg(cx + 0.3, y + 0.41, cx + 0.05, y + 0.72, 0.02, mul(C.steel, 0.8), a, 0, md);
+    if (!ghost) { b.add(cx + 0.02, y + 0.7, 0.14, 0.05, 0, mul(C.warm, on ? 3 : 0.8), 1, 0, 2); if (on && Math.sin(time * 7 + m.seed) > 0.5) b.add(cx - 0.2, y + 0.46, 0.05, 0.05, 0, [4, 2.4, 0.8], 1, 1, 2); }
   } else if (m.kind === 'power pole') { A(cx, y + h / 2, 0.08, h, 0, mul(C.steel, 0.8), 1, 0, md, 2); A(cx, y + h - 0.2, 0.6, 0.06, 0, mul(C.steel, 0.9)); for (const d of [-0.26, 0.26]) A(cx + d, y + h - 0.12, 0.06, 0.1, 0, mul(C.hull, 0.5)); }
   else if (m.kind === 'camera') { A(cx, y + h / 2 - 0.1, 0.05, h - 0.2, 0, mul(C.steel, 0.8)); A(cx, y + h - 0.12, 0.26, 0.14, Math.sin(time * 0.6 + m.seed) * 0.5, C.dark, 1, 2, md, 3); if (!ghost) b.add(cx + Math.sin(time * 0.6 + m.seed) * 0.08, y + h - 0.12, 0.05, 0.05, 0, mul(C.red, 2.2), 1, 1, 2); }
   else if (m.kind === 'radar') { A(cx, y + 0.35, 0.07, 0.7, 0, mul(C.steel, 0.8)); A(cx, y + 0.8, 0.5, 0.12, Math.sin(time * 1.4 + m.seed) * 0.9, mul(C.hull, 0.45), 1, 2, md, 3); if (!ghost) b.add(cx, y + 0.86, 0.05, 0.05, 0, mul(C.cyan, 2), 1, 1, 2); }
