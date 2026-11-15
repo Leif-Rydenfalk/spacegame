@@ -215,3 +215,50 @@ Priority if time runs short:
 - **First:** 1-5, 8 and a minimal 7 (a short chain); 9 with a small freighter; 10.
 - **Then:** 6 at basic level (static stress plus joint failure).
 - **Moves to round 9:** stress waves and the full chain.
+
+---
+
+# Revision 2 (Leif, 2026-11-15): biology uses the same components
+
+Leif, verbatim:
+> everythign is mafe up of these fundamental components. and biology also has. trees. plants. animals. everytihng is made up of componetns with parametrs so its 100% procedural, reusable and can be used in the tech tree and system. a treebranch can become a structural material your robots use. a insect antenna can be used by your snesors and plugged into a circuit to detect and colelct data on smell nd animal presence. for example .the engine must be modular enough so that modelling thousands of details like this becomes pretty easy and modualr and ettensible and produces millions and billions of combinations and systems and variations. fully procedural
+
+## RV5. One component model for machines and living things
+- **Living things are assemblies of parametrised biological components**, on the same footing as machine components (material × shape × function):
+  - structural: wood, bone, chitin plate, cartilage, shell, root;
+  - motion: muscle (force ∝ cross-section), tendon, joint, wing membrane, cilia;
+  - energy and chemistry: leaf (photosynthesis rate ∝ area × light), fat store, gland (secretion: venom, resin, ichor), bioluminescent organ;
+  - fluids: vessels, heart pump, xylem;
+  - sensing: eye, antenna (chemoreceptor), lateral line, hair sensor;
+  - control: ganglion, brain.
+- **Each has a material spec** (wood: density, fibre strength along and across grain; chitin: modulus, toughness) **and a working principle** that gives stats, exactly like a motor or a beam.
+- **The procedural generator builds organisms from these components** with body-plan grammars: tree, shrub, fungus, crawler, strider, flyer, balloon, hive caste. Species parameters (seeded per planet) set sizes, counts and materials. Rendering, physics (springs, ragdolls, felling), behaviour limits (speed from muscle and mass) and scan results all come from the assembly.
+- **Harvested biological parts are items in the same part tree** and can fill any function slot whose requirements they meet:
+  - a tree branch, as a beam with the wood's properties, is a structural member robots can use;
+  - an insect antenna, as a chemoreceptor with sensitivity and selectivity, plugs into a circuit as a smell or animal-presence sensor that streams data;
+  - resin is an adhesive or sealant; chitin plates are armour; balloon gas sacs are lift volumes for cargo balloons; bioluminescent organs are light sources; muscle fibre is an actuator in a bio-machine.
+  - Scanning reveals each part's real parameters; the more data, the narrower the uncertainty (SCIENCE V3).
+- **Biotech in the tech tree** is about learning to use, grow, breed and then design these components: cultivate the antenna organism, grow trees as structural timber farms, engineer balloon species. It is the same research and data loop (SCIENCE section 4).
+
+## RV6. Engine requirement: modular and extensible enough for billions of combinations
+- **A component is a data definition, not code:**
+  - parameters with ranges;
+  - a material slot;
+  - a shape grammar;
+  - a function block (inputs, outputs, requirements, a small formula set for its working principle);
+  - render rules;
+  - physics rules;
+  - recycling paths.
+  - Adding a new component (a new gland, a new valve) is one definition file plus at most a small principle formula.
+- **Assemblies are graphs of components** with typed ports: mechanical, fluid, electrical, data, chemical and biological-signal. Ports validate compatibility by requirements, not by item id, so a chitin plate fits an armour slot, and an antenna fits a sensor port through a bio-electric interface component.
+- **Generators** (planet, species, machines, ships, blueprints) are grammars over this graph. Combinations multiply: thousands of definitions × parameters × materials × assemblies produce millions to billions of distinct, valid, simulated things.
+- **Stats, rendering, physics, scanning, the part tree, the tech tree, recycling and the ledger all read the same graph.** No subsystem keeps a separate copy of what a thing is.
+- **Performance:**
+  - definitions are compiled to compact typed arrays at load;
+  - assemblies are stored as flat component lists with port indices;
+  - aggregate stats are cached and invalidated on edit;
+  - LOD collapses distant assemblies to their cached stats and impostor rendering.
+- **Round 8:**
+  - build this component data model and the definition format first, with the machine library and a first biological set (tree, branch, leaf, the antenna insect, the strider);
+  - demonstrate one cross-over each way: a branch used as a structural member, and an insect antenna plugged in as a sensor;
+  - the full surface species migration moves to a later round.
