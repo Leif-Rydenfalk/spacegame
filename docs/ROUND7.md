@@ -79,3 +79,23 @@ One graph holds every item in the game: raw materials, parts, components, assemb
 3. Section 5 part tree and its UI, with section 3 recycling and section 4 disassembly.
 4. Blueprints as items, scanning, the tech tree.
 5. The rest of section 6 as far as it goes. List what moves to round 8.
+
+## 7. Only one matter compiler: the one on your arm (Leif, 2026-11-15)
+Leif, verbatim: "it must be as realistic as posbile. think of the whole supply chain and what we can do because of the matter ocmpiler. thje only matter compiler we have on hand is the on e on our arm the ship doesnt have one bascause they are extreemly rare and expensive even on earth."
+
+- Remove any matter-compiler-like ability from the ship. The round 4 "wreck fabricator" becomes **conventional ship machine-shop gear** with realistic limits:
+  - a small metal powder-bed printer (needs metal powder, makes small precise parts slowly);
+  - a polymer printer;
+  - a CNC mill and lathe (needs stock bar and plate);
+  - a soldering and rework bench (assembles PCBs from chips; cannot make chips).
+  - Each is a salvageable item with power and materials.
+- **The arm's matter compiler is the only device that can make anything from raw matter.** It is slow and imperfect (SCIENCE V2). In the supply chain it is the bottleneck and the bootstrap: it makes
+  - the first chips (CPUs, GPUs, SSD controllers and flash) until a chip line exists;
+  - tooling (moulds, masks, jigs);
+  - precision parts no machine can make yet;
+  - seed parts of new machines.
+- The global queue therefore treats the arm as a scarce, precious producer.
+  - It assigns the arm only what no other producer can make, and shows its queue and ETA prominently.
+  - Everything that conventional machines can make goes to them.
+  - Building a conventional replacement for anything the arm makes repeatedly is the main "next step" suggestion.
+- Losing or damaging the arm is a serious event, since it cannot be replaced from the ship.
