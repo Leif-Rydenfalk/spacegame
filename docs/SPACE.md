@@ -144,3 +144,74 @@ Out of scope for round 8: shipyard, combat, crew needs beyond O2, power and heat
 ## Open questions for Leif
 1. Should the belt base's starting state be hand-authored lore (what you built during the "missing years") or generated from a simulated fast-forward of the planet game?
 2. Is the solar furnace (mirrors) allowed early, or must power be electric?
+
+---
+
+# Revision 1 (Leif, 2026-11-15)
+
+Leif, verbatim:
+> nothing is written by hand. everything si genrated. on the fly. procedural. the whole solar sysstem is unique per player. Everything is allowed the question is can you produce it. do you have the mateirals and technology for it? do you have the mahchine tomake the specialized mirrors required for it and the time to reate the thousands of specialized components? it would take a week on your hand matter compiler withut the supply chain. tiem is the limit. time sis why you scale up and create more and more specialied machines and automate that too. build the shipyard system and atuoamtion right a way. the pooint of the demo is prototyping this gameplay loop and how automation feels. every singel machine is made up of actaul parts. in reandering and in teh tech tree and component tree. everything is rendered and something that can be modified. very single machine is made up of fudnamentla components that can be altered. this si an important complex system. every single component is made up of actual functaionly and ho it actually works is modular. so every machine is made up of fundamental components. amd tjese co,pometms are made and palced and moved and assembled in palce by robots and designed by ai and we have several and many blueprinsts for it to start - the amchines you can place at the start. but everythign si modifyiable and you can make your own designs. desinging aeacho of the individual parts and machines and functiojnlity and pieces and componetns and parts is very important. everything is structurally simulated. the ships are physialyl accurate and the pulses traverse the ships physically based and the phsyics is completely realistic with deformation. its not grid based but highyl efficent. the shapes cna be any shape like in reassembly with attatchement points made up of these ufndamentla parts. everything is procedural so that when placing a strucuterwith any size the blueprint palces the boldts and scres and the metal beams and designs them with the material constraints you nede so that it s all actually produced. very high complexity but this allows us to procedurally genrate and simulte entire ships and fleets and have procedural customizable technology you can dig deep into to optimize and perfect but also make it easy to just place using th recursive blueprint system if you need to.
+
+## Answers to the open questions
+1. **Nothing is hand-written.** The belt base's starting state is generated on the fly from the player's seed, like everything else. The whole solar system is unique per player.
+2. **Everything is allowed; the limit is whether you can produce it.** Do you have the materials, the technology, the machine that makes the specialised mirrors, and the time to make the thousands of parts? On the arm alone it would take about a week of game time. **Time is the limit**, and that is why you scale up into specialised machines and then automate making those machines too.
+
+## RV1. Machines are made of fundamental components (one system, all the way down)
+- **Fundamental components** are a small library of physically working building blocks, each a material × shape × function (section 1):
+  - structure: beam, plate, bracket, fastener, weld;
+  - motion: bearing, shaft, gear, belt drive, linear guide, hydraulic cylinder, valve;
+  - energy: electric motor, heater element, induction coil, heat pipe, radiator panel, battery cell, solar cell, mirror facet;
+  - fluids: pipe, pump, tank, seal;
+  - sensing and control: sensor, controller (PCB), wiring.
+- **Each component works by its real principle**, simulated at a level that gives its stats. A motor's torque comes from coil current × flux; a roller's force from motor torque × gear ratio ÷ radius; a furnace's power from the coil and the load.
+- **Every machine is an assembly of components**, rendered as those components (you see the motor, the gearbox, the rollers, the frame, the bolts).
+  - It is listed in the part tree; its capability is computed from them.
+  - Example: a rolling mill's maximum reduction per pass comes from roll force, roll diameter and the strip's yield strength.
+- **Robots make, move, place and assemble components in place.** Building a machine is visible assembly, not a progress bar.
+- **Starting blueprints:** the game ships with many procedurally generated, AI-designed machine blueprints (crusher, mill, magnetic separator, centrifuge furnace, caster, rolling stand, thread roller, wire drawer, press, CNC, welder, tug, freighter, shipyard gantry...).
+  - Every one is modifiable: open it, swap a motor, change a material, resize a roll, and see the new capability and part list live.
+  - You can design your own from scratch.
+
+## RV2. The recursive, procedural blueprint system
+- A blueprint is **parametric and recursive**: a structure blueprint takes size and load requirements and generates its own members, joints, bolts and screws, sized by real structural rules for the chosen materials (section 1). Those are then real parts in the part tree that must be produced.
+- Placing a hull section of any size or shape:
+  - the blueprint lays out the frame members;
+  - it designs each joint (bolt count, diameter, grade from the material's strength);
+  - it adds plating thickness from the loads;
+  - and emits the bill of materials into the global queue.
+- **Recursion:** a ship blueprint contains volume blueprints (SHIPS.md), which contain machine blueprints, which contain component blueprints, which contain material specs. Every level can be opened and edited, or left to the AI.
+- **Easy by default, deep on demand:** "place a freighter" works in one click; a player who wants to perfect a gearbox's tooth profile can.
+
+## RV3. Structural simulation (not grid-based, efficient)
+- Structures (ships, stations, machines, asteroid anchors) are simulated as a **node-and-member network**: the frame's beams and joints as nodes and elastic-plastic members with real stiffness from the material and section. Plates are shell elements coarsened to their frame cells.
+  - Solved with an implicit or XPBD solver on the GPU or in a worker, sparse, at an adaptive resolution: fine near loads and damage, coarse elsewhere.
+- **What this gives:**
+  - **Stress and deformation** under thrust, docking, spin, impacts and thermal expansion. Members yield and bend plastically, and joints fail when bolt shear or weld strength is exceeded. The ship splits along failed members (the existing connectivity split).
+  - **Impulses travel physically**: an impact or a weapon pulse sends a stress wave through the members at the material's wave speed (√(E/ρ) ≈ 5 km/s in steel), attenuating at joints, so damage spreads realistically.
+  - **Any shape** (Reassembly-like): attachment points are real joints made of fundamental parts, so the shape is free.
+- The level of detail of the simulation follows the camera and the action. Distant fleets run as rigid bodies with a stored stress state until something happens to them.
+
+## RV4. Shipyard and automation from the start of the prototype
+- **The shipyard is in round 8:**
+  - a gantry and drone swarm that assembles any ship blueprint from parts pulled from the ledger;
+  - visible welding and bolting;
+  - frame first, then volumes, then systems, then tests.
+- **Automated production of production:** the AI also builds the machines that make the machines. "Make 10 freighters" can expand into "first build a second rolling stand and a thread roller", and the plan shows that.
+- **The demo's point (Leif): prototype this loop and how automation feels.** Intent, the AI plan, robots assembling real components into machines, machines producing parts, the shipyard assembling ships, and ships extending logistics.
+
+## Round 8 scope, revised (replaces section 8 where it differs)
+1. `?start=belt-base`: generated per seed, a solar system unique per player, the base generated from the seed (no authored layout).
+2. Material × shape × function plus derived properties (section 1).
+3. The fundamental component library (RV1), with real-principle stats and rendering.
+4. Machines as component assemblies, generated as starting blueprints and editable in a machine editor with live stats.
+5. Parametric recursive blueprints that size joints and fasteners (RV2).
+6. Structural simulation on ships and stations (RV3), with deformation, joint failure, splitting and stress-wave propagation.
+7. The asteroid-to-screw chain (section 2) built from those machines.
+8. Robots assembling components in place.
+9. Shipyard (RV4).
+10. Flow view, ledger and lineage; the intent box with the AI plan; tug lock-on.
+
+Priority if time runs short:
+- **First:** 1-5, 8 and a minimal 7 (a short chain); 9 with a small freighter; 10.
+- **Then:** 6 at basic level (static stress plus joint failure).
+- **Moves to round 9:** stress waves and the full chain.
